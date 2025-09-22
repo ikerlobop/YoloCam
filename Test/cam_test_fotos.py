@@ -52,11 +52,6 @@ INDEX_HTML = """
       gap: 10px;
       margin-top: 12px;
     }
-    /* FILA 2 invertida → derecha a izquierda */
-    .grid-row-2{
-      direction: rtl;
-      display: contents; /* deja que sus hijos (.cell) sean los grid items */
-    }
     .cell {
       position: relative;
       aspect-ratio: 16/9;
@@ -104,34 +99,18 @@ INDEX_HTML = """
     const countEl = document.getElementById('count');
     const footEl = document.getElementById('foot');
 
-    // Render inicial: 10 celdas vacías (fila 1 normal, fila 2 invertida)
+    // Render inicial: 10 celdas vacías
     function emptyGrid() {
       grid.innerHTML = '';
-
-      // --- Primera fila normal (slots 1-5) ---
-      for (let i = 0; i < 5; i++) {
+      for (let i = 0; i < 10; i++) {
         const cell = document.createElement('div');
         cell.className = 'cell';
         const span = document.createElement('div');
         span.className = 'slot';
-        span.textContent = 'Slot ' + String(i + 1).padStart(2, '0');
+        span.textContent = `Slot ${String(i+1).padStart(2,'0')}`;
         cell.appendChild(span);
         grid.appendChild(cell);
       }
-
-      // --- Segunda fila invertida (slots 6-10) ---
-      const row2Wrapper = document.createElement('div');
-      row2Wrapper.className = 'grid-row-2';
-      for (let i = 5; i < 10; i++) {
-        const cell = document.createElement('div');
-        cell.className = 'cell';
-        const span = document.createElement('div');
-        span.className = 'slot';
-        span.textContent = 'Slot ' + String(i + 1).padStart(2, '0');
-        cell.appendChild(span);
-        row2Wrapper.appendChild(cell);
-      }
-      grid.appendChild(row2Wrapper);
     }
     emptyGrid();
 
@@ -156,20 +135,21 @@ INDEX_HTML = """
           footEl.textContent = '';
         }
 
-        // Pintar grid en orden lógico 1..10 sobre las 10 .cell
-        const cells = grid.querySelectorAll('.cell');
+        // Pintar grid
+        // Primero las imágenes, luego los huecos vacíos
+        const cells = grid.children;
         for (let i = 0; i < 10; i++) {
           const cell = cells[i];
           cell.innerHTML = '';
           if (i < data.images.length) {
             const img = document.createElement('img');
             img.src = data.images[i] + '?t=' + Date.now(); // bust cache
-            img.alt = 'Captura ' + (i + 1);
+            img.alt = `Captura ${i+1}`;
             cell.appendChild(img);
           } else {
             const span = document.createElement('div');
             span.className = 'slot';
-            span.textContent = 'Slot ' + String(i + 1).padStart(2, '0');
+            span.textContent = `Slot ${String(i+1).padStart(2,'0')}`;
             cell.appendChild(span);
           }
         }
@@ -207,6 +187,8 @@ def capture_loop():
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, WIDTH)
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, HEIGHT)
         cap.set(cv2.CAP_PROP_FPS, FPS)
+
+        start_time = time.time()
 
         while True:
             with lock:
