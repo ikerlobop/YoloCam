@@ -1,0 +1,37 @@
+def log ():
+    return r"""
+<!doctype html>
+<html lang="es"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Iniciar sesión — ATL RDT</title>
+<style>
+  body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,Arial;background:#0a0e1a;color:#e6e8ee;display:grid;place-items:center;min-height:100vh;margin:0}
+  .card{width:min(360px,92vw);background:#121826;border:1px solid #223052;border-radius:14px;padding:20px}
+  h1{font-size:1.1rem;margin:0 0 14px}
+  label{font-size:.85rem}
+  input{width:100%;padding:10px;border-radius:10px;border:1px solid #223052;background:#0f1420;color:#fff;margin-top:6px}
+  .row{margin:10px 0}
+  .btn{width:100%;padding:12px;border:none;border-radius:10px;background:#00ff41;color:#000;font-weight:800;cursor:pointer}
+  .err{color:#ff6b6b;font-size:.9rem;margin:8px 0 0}
+  .hint{font-size:.8rem;opacity:.7;margin-top:8px}
+</style>
+</head><body>
+  <div class="card">
+    <h1>🔒 Iniciar sesión</h1>
+    <form method="post" action="/login">
+      <div class="row">
+        <label>Email</label>
+        <input name="email" type="email" placeholder="user@empresa.com" required>
+      </div>
+      <div class="row">
+        <label>Contraseña</label>
+        <input name="password" type="password" placeholder="••••••••" required>
+      </div>
+      <input type="hidden" name="next" value="{{ next_url }}">
+      <button class="btn" type="submit">Entrar</button>
+      {% if error %}<div class="err">{{ error }}</div>{% endif %}
+      <div class="hint">Demo: miguel@rdt.local / rdt1234</div>
+    </form>
+  </div>
+</body></html>
+"""
