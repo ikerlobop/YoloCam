@@ -11,6 +11,7 @@ import sqlite3
 from views.index import front
 from views.login_user import log
 from typing import List
+import psutil
 
 # import cv2  # <-- CÁMARA DESACTIVADA, deja import comentado para futuro
 
@@ -41,8 +42,8 @@ SPLIT_MODE = os.environ.get("SPLIT_MODE", "valid_only").lower()
 # Validación mínima: exigir que exista el .txt de labels con el mismo stem
 REQUIRE_LABEL = True
 
-TOTAL_SLOTS = 10       # 2×5
-CYCLE_SECONDS = 5      # ritmo de selección
+TOTAL_SLOTS = 10      # 2×5
+CYCLE_SECONDS = 2    # ritmo de selección
 
 DB_PATH = "users.db"
 SECRET_DEFAULT = "dev-secret-change-me"
@@ -130,6 +131,50 @@ def logout():
     session.clear()
     return redirect(url_for("login"))
 
+import psutil
+
+@app.route("/system")
+def get_system_info():
+    """
+    Devuelve información del sistema: CPU, RAM, GPU (si disponible)
+    """
+    # CPU usage
+    cpu_percent = psutil.cpu_percent(interval=None)
+
+    # RAM
+    ram = psutil.virtual_memory()
+    ram_used = round(ram.used / (1024 ** 3), 2)   # en GB
+    ram_total = round(ram.total / (1024 ** 3), 2) # en GB
+
+    # GPU (opcional: si tienes NVIDIA y pynvml instalado)
+    try:
+        import pynvml
+        pynvml.nvmlInit()
+        handle = pynvml.nvmlDeviceGetHandleByIndex(0)
+        gpu_name = pynvml.nvmlDeviceGetName(handle).decode()
+        gpu_util = pynvml.nvmlDeviceGetUtilizationRates(handle).gpu
+        pynvml.nvmlShutdown()
+    except Exception:
+        gpu_name = "N/A"
+        gpu_util = None
+
+    # Modelo actual (split que estás usando)
+    model = SPLIT_MODE.upper()
+
+    return jsonify({
+        "cpu": cpu_percent,
+        "ram": {
+            "used": ram_used,
+            "total": ram_total
+        },
+        "gpu": {
+            "name": gpu_name,
+            "usage": gpu_util
+        },
+        "model": model
+    })
+
+
 @app.route("/me")
 def me():
     if "user_id" not in session:
@@ -187,8 +232,8 @@ def build_pool(mode: str) -> List[str]:
 # ----------------- CAPTURA (SELECCIÓN ALEATORIA) -----------------
 def capture_loop():
     """
-    Sin cámara. Selecciona imágenes aleatorias desde el split configurado.
-    'Valida' descartando las que no tienen su .txt en labels.
+    Selecciona imágenes 1 a 1 desde el dataset y las coloca en cada slot
+    hasta llenar los 10. No se repiten imágenes dentro de un ciclo.
     """
     try:
         pool_remaining = build_pool(SPLIT_MODE)
@@ -198,46 +243,43 @@ def capture_loop():
                 f"Revisa la estructura en {DATASET_DIR}/<split>/images + labels"
             )
 
-        # Evitar repetir: vamos sacando del pool barajado
-        while True:
+        slot_idx = 0  # índice para controlar en qué slot estamos
+
+        while slot_idx < TOTAL_SLOTS:
             with lock:
+                # Si ya hemos llenado los 10 slots, paramos
                 if len(state["images"]) >= TOTAL_SLOTS:
                     state["running"] = False
                     state["stopped"] = True
                     break
 
             if not pool_remaining:
-                # si se agota el pool antes de completar slots, paramos
+                # Si ya no hay imágenes, terminamos
                 with lock:
                     state["running"] = False
                     state["stopped"] = True
-                    state["error"] = None
+                    state["error"] = "No quedan imágenes disponibles."
                 break
 
-            cycle_t0 = time.time()
-
-            # Toma 3 candidatos al azar del pool restante (o menos si queda poco)
-            k = min(3, len(pool_remaining))
-            candidates = random.sample(pool_remaining, k=k)
-            chosen = random.choice(candidates)
-
-            # Quitamos el elegido del pool para no repetir
-            try:
-                pool_remaining.remove(chosen)
-            except ValueError:
-                pass
+            # Toma la primera imagen disponible (FIFO) o al azar, como prefieras
+            chosen = pool_remaining.pop(0)  # primera
+            # chosen = random.choice(pool_remaining)  # <- alternativa aleatoria
+            # pool_remaining.remove(chosen)
 
             with lock:
                 state["images"].append(chosen)
+                slot_idx += 1
+                print(f"[DEBUG] Slot {slot_idx} cargado con {chosen}")
 
-            elapsed = time.time() - cycle_t0
-            time.sleep(max(0.0, CYCLE_SECONDS - elapsed))
+            # Espera entre capturas (simula la cámara)
+            time.sleep(CYCLE_SECONDS)
 
     except Exception as e:
         with lock:
             state["error"] = str(e)
             state["running"] = False
             state["stopped"] = True
+
 
 def ensure_thread():
     with lock:

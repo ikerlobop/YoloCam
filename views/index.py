@@ -1,6 +1,5 @@
 def front():
-
- return r"""
+    return r"""
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -35,9 +34,12 @@ def front():
     .status-dot-position{width:6px;height:6px;background:#00ff41;border-radius:50%;animation:pulse 2s infinite}
     @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
     .main-area{margin-left:350px;height:100vh;display:grid;grid-template-columns:1fr 320px;grid-template-rows:auto 1fr auto}
-    .top-bar{grid-column:1/-1;background:linear-gradient(90deg,#1a1f3a 0%,#2a3f5f 100%);padding:15px 30px;display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid #00ff41}
-    .controls-section{display:flex;align-items:center;gap:15px}
+    .top-bar{grid-column:1/-1;background:linear-gradient(90deg,#1a1f3a 0%,#2a3f5f 100%);padding:15px 30px;display:flex;gap:16px;align-items:center;justify-content:space-between;border-bottom:2px solid #00ff41}
+    .controls-section{display:flex;align-items:center;gap:15px;margin-left:auto}
+    .time-and-logout{display:flex;align-items:center;gap:12px}
     .time-display{font-family:"Courier New",monospace;font-size:18px;font-weight:bold;color:#00ff41}
+    .logout-btn{border:none;background:#ff4d4d;color:#000;font-weight:800;padding:8px 12px;border-radius:10px;cursor:pointer;transition:.2s}
+    .logout-btn:hover{transform:translateY(-1px);filter:brightness(1.05)}
     .main-content{position:relative;margin:20px 0 0 20px;border-radius:15px;overflow:hidden;background:linear-gradient(135deg,#000 0%,#1a1a1a 100%);border:3px solid #2a3f5f;display:flex;flex-direction:column}
     .video-header{background:rgba(0,0,0,.8);padding:10px 20px;display:flex;justify-content:space-between;align-items:center}
     .video-title{font-size:14px;font-weight:600;color:#00ff41}
@@ -45,6 +47,9 @@ def front():
     .photo-library{background:linear-gradient(180deg,#1a1f3a 0%,#0f1419 100%);border-left:3px solid #ff0080;display:flex;flex-direction:column;margin:20px 20px 0 20px;border-radius:15px 0 0 0}
     .library-header{background:linear-gradient(135deg,#ff0080,#cc0066);padding:15px;color:#000;font-weight:bold;font-size:14px;text-align:center;text-transform:uppercase}
     .photos-container{flex:1;overflow-y:auto;padding:15px;max-height:calc(100vh - 250px)}
+    .thumb-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+    .thumb{width:100%;aspect-ratio:16/9;object-fit:cover;border-radius:8px;border:1px solid #223052;cursor:pointer;transition:.2s}
+    .thumb:hover{transform:scale(1.02)}
     .bottom-status{grid-column:1/-1;background:#0a0e1a;padding:10px 30px;border-top:1px solid #2a3f5f;display:flex;justify-content:space-between;align-items:center}
     .grid-wrap{width:min(1200px,96%);margin:16px auto}
     .gridTitle{font-size:13px;letter-spacing:.4px;color:#9dc0ff;opacity:.9;margin:8px 0 6px 8px}
@@ -64,14 +69,23 @@ def front():
     .btn-small:disabled{opacity:.6;cursor:not-allowed}
     .btn-small.success{background:linear-gradient(135deg,#00ff41,#00cc34);color:#000}
     .btn-small.warn{background:linear-gradient(135deg,#ffd166,#ffb703);color:#000}
+
+    /* Lightbox */
+    .modal{position:fixed;inset:0;background:rgba(0,0,0,.75);display:flex;align-items:center;justify-content:center;z-index:999}
+    .modal.hidden{display:none}
+    .modal-inner{position:relative;max-width:min(90vw,1200px);max-height:90vh}
+    .modal-inner img{max-width:100%;max-height:90vh;border-radius:10px;border:2px solid #223052;display:block}
+    .modal-close{position:absolute;top:-12px;right:-12px;background:#ff4d4d;border:none;border-radius:999px;width:36px;height:36px;color:#000;font-weight:900;font-size:18px;cursor:pointer}
   </style>
 </head>
 <body>
+  <!-- Sidebar -->
   <div class="sidebar">
     <div class="sidebar-header">
       <div class="system-title">ATL RDT SYSTEM</div>
       <div class="system-subtitle">Quality Control Interface</div>
     </div>
+
     <div class="project-section">
       <div class="section-label">Proyecto Activo</div>
       <div class="project-name">WING_A320_COMPOSITE_v3.2</div>
@@ -82,6 +96,7 @@ def front():
         <div class="info-item"><div class="info-label">Lote</div><div class="info-value">L-240919</div></div>
       </div>
     </div>
+
     <div class="layer-section">
       <div class="section-label">Control de Capas</div>
       <div class="current-layer-display">
@@ -89,6 +104,7 @@ def front():
         <div class="layer-total">de 32 capas</div>
       </div>
     </div>
+
     <div class="position-section">
       <div class="section-label">Posición ATL en Tiempo Real</div>
       <div class="position-display">
@@ -104,6 +120,7 @@ def front():
     </div>
   </div>
 
+  <!-- Área principal -->
   <div class="main-area">
     <div class="top-bar">
       <div class="operator-info">
@@ -119,8 +136,13 @@ def front():
           <button id="resetBtn" class="btn-small warn" onclick="resetCapture()">🧹 Reset</button>
         </div>
       </div>
+
       <div class="controls-section"></div>
-      <div class="time-display" id="currentTime">--:--:--</div>
+
+      <div class="time-and-logout">
+        <button class="logout-btn" onclick="window.location.href='/logout'">Cerrar sesión</button>
+        <div class="time-display" id="currentTime">--:--:--</div>
+      </div>
     </div>
 
     <div class="main-content">
@@ -129,6 +151,7 @@ def front():
           <div class="video-title">🎥 FEED EN VIVO - CÁMARA PRINCIPAL</div>
           <div class="video-stats">640×480 | 30 FPS | Flask Grid</div>
         </div>
+        <!-- GRID 2×5 -->
         <div class="grid-wrap">
           <div class="gridTitle">📸 Capturas (2×5)</div>
           <div class="grid" id="grid"></div>
@@ -139,8 +162,7 @@ def front():
     <div class="photo-library">
       <div class="library-header">📸 BIBLIOTECA DE CAPTURAS</div>
       <div class="photos-container">
-        <div style="opacity:.7;font-size:12px;padding:6px 8px;">(Demo UI; el grid funcional está a la izquierda)</div>
-        <div style="padding:6px 8px;"><a href="/logout" style="color:#9dc0ff;text-decoration:none">Cerrar sesión</a></div>
+        <div id="thumbs" class="thumb-grid"></div>
       </div>
     </div>
 
@@ -149,13 +171,24 @@ def front():
       <div class="system-performance">GPU: — | CPU: — | RAM: — | Modelo: —</div>
     </div>
   </div>
+
+  <!-- Lightbox -->
+  <div id="lightbox" class="modal hidden" onclick="closeLightbox(event)">
+    <div class="modal-inner">
+      <img id="lightboxImg" alt="Vista ampliada">
+      <button class="modal-close" onclick="closeLightbox(event)">×</button>
+    </div>
+  </div>
+
   <script>
+  // Reloj
   function updateTime(){
     const now=new Date();
     document.getElementById('currentTime').textContent=now.toTimeString().slice(0,8);
   }
   setInterval(updateTime,1000); updateTime();
 
+  // Operario desde /me
   async function fillOperator(){
     try{
       const r = await fetch('/me');
@@ -164,7 +197,6 @@ def front():
         const avatar = document.querySelector('.operator-avatar');
         const nameEl = document.querySelector('.operator-name');
         const roleEl = document.querySelector('.operator-role');
-
         if(avatar && u.name){
           const ini = u.name.split(' ').map(s=>s[0]).filter(Boolean).slice(0,2).join('').toUpperCase();
           avatar.textContent = ini || 'OP';
@@ -175,6 +207,7 @@ def front():
     }catch(e){ console.warn('no /me', e); }
   }
 
+  // Grid vacío inicial
   const grid = document.getElementById('grid');
   function emptyGrid(){
     grid.innerHTML='';
@@ -202,6 +235,34 @@ def front():
   }
   emptyGrid();
 
+  // Lightbox helpers
+  function openLightbox(src){
+    const lb = document.getElementById('lightbox');
+    const img = document.getElementById('lightboxImg');
+    img.src = src;
+    lb.classList.remove('hidden');
+  }
+  function closeLightbox(ev){
+    // Evita que el click en la imagen cierre el modal
+    if(ev && ev.target && ev.target.id === 'lightboxImg') return;
+    document.getElementById('lightbox').classList.add('hidden');
+  }
+
+  // Render biblioteca (miniaturas)
+  function renderLibrary(urls){
+    const thumbs = document.getElementById('thumbs');
+    thumbs.innerHTML = '';
+    urls.forEach(u=>{
+      const img = document.createElement('img');
+      img.className = 'thumb';
+      img.src = u + '?t=' + Date.now();
+      img.alt = 'Captura';
+      img.addEventListener('click', ()=> openLightbox(u));
+      thumbs.appendChild(img);
+    });
+  }
+
+  // Polling
   let poller = null;
 
   async function fetchState(){
@@ -209,6 +270,7 @@ def front():
       const res=await fetch('/state');
       const data=await res.json();
 
+      // Render grid 2×5
       const cells=grid.querySelectorAll('.cell');
       for(let i=0;i<10;i++){
         const cell=cells[i];
@@ -225,6 +287,10 @@ def front():
           cell.appendChild(span);
         }
       }
+
+      // Render biblioteca de capturas
+      renderLibrary(data.images);
+
       if(data.stopped){ stopPolling(); }
     }catch(e){
       console.warn('Error fetch /state',e);
@@ -234,7 +300,7 @@ def front():
 
   async function bootPollingIfNeeded() {
     if (!poller) {
-      await fetchState();
+      await fetchState();                 // primer paint
       poller = setInterval(fetchState, 1000);
     }
   }
@@ -243,8 +309,9 @@ def front():
     if (poller) { clearInterval(poller); poller = null; }
   }
 
-  function clearGrid() { emptyGrid(); }
+  function clearGrid() { emptyGrid(); renderLibrary([]); }
 
+  // Botones
   async function startCapture() {
     const startBtn = document.getElementById('startBtn');
     const resetBtn = document.getElementById('resetBtn');
@@ -278,8 +345,8 @@ def front():
       const data = await res.json();
 
       if (data.status === 'reset_done') {
-        stopPolling();
-        clearGrid();
+        stopPolling();     // detenemos refresco
+        clearGrid();       // limpiamos UI
         if (startBtn) { startBtn.disabled = false; startBtn.textContent = '▶️ Arrancar'; }
         if (resetBtn) { resetBtn.textContent = '🧹 Reset'; }
       } else {
@@ -294,7 +361,8 @@ def front():
   }
 
   fillOperator();
-</script>
+  // Polling se inicia al pulsar "Arrancar"
+  </script>
 
 </body>
 </html>
