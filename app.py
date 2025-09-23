@@ -2,19 +2,16 @@
 # app.py — UI ATL + grid 2x5 + Login (SQLite) + Botón Arrancar + Botón Reset
 # Dataset-aware (train/valid/test): elige imágenes al azar del split elegido,
 # valida que tengan su etiqueta en labels y descarta las que no.
+# + Contador de capas: sube +1 en cada "Arrancar" hasta el total.
 
 import os
 import time
 import threading
 import random
 import sqlite3
-from views.index import front
-from views.login_user import log
 from typing import List
+
 import psutil
-
-# import cv2  # <-- CÁMARA DESACTIVADA, deja import comentado para futuro
-
 from flask import (
     Flask, jsonify, render_template_string,
     session, redirect, request, url_for
@@ -22,6 +19,8 @@ from flask import (
 from werkzeug.security import generate_password_hash, check_password_hash
 from functools import wraps
 
+from views.index import front
+from views.login_user import log
 
 # ----------------- CONFIG -----------------
 # Cámara (queda desactivada para el futuro)
@@ -43,10 +42,13 @@ SPLIT_MODE = os.environ.get("SPLIT_MODE", "valid_only").lower()
 REQUIRE_LABEL = True
 
 TOTAL_SLOTS = 10      # 2×5
-CYCLE_SECONDS = 2    # ritmo de selección
+CYCLE_SECONDS = 2     # ritmo de selección
 
 DB_PATH = "users.db"
 SECRET_DEFAULT = "dev-secret-change-me"
+
+# Capas
+LAYER_TOTAL = int(os.environ.get("LAYER_TOTAL", "32"))
 # -----------------------------------------
 
 app = Flask(__name__, static_folder="static")
@@ -57,7 +59,9 @@ state = {
     "images": [],       # rutas RELATIVAS a /static (ej: 'dataset/valid/images/xxx.jpg')
     "running": False,
     "stopped": False,
-    "error": None
+    "error": None,
+    "layer_current": 0,
+    "layer_total": LAYER_TOTAL,
 }
 lock = threading.Lock()
 
@@ -106,7 +110,6 @@ def login_required(fn):
     return wrapper
 
 @app.route("/login", methods=["GET", "POST"])
-
 def login():
     next_url = request.values.get("next") or "/"
     if request.method == "POST":
@@ -120,10 +123,8 @@ def login():
             session["user_email"] = user["email"]
             return redirect(next_url)
         else:
-            # 👇 usar log()
             return render_template_string(log(), error="Credenciales inválidas", next_url=next_url)
     else:
-        # 👇 usar log()
         return render_template_string(log(), error=None, next_url=next_url)
 
 @app.route("/logout")
@@ -131,8 +132,7 @@ def logout():
     session.clear()
     return redirect(url_for("login"))
 
-import psutil
-
+# ----------------- SISTEMA -----------------
 @app.route("/system")
 def get_system_info():
     """
@@ -163,17 +163,10 @@ def get_system_info():
 
     return jsonify({
         "cpu": cpu_percent,
-        "ram": {
-            "used": ram_used,
-            "total": ram_total
-        },
-        "gpu": {
-            "name": gpu_name,
-            "usage": gpu_util
-        },
+        "ram": {"used": ram_used, "total": ram_total},
+        "gpu": {"name": gpu_name, "usage": gpu_util},
         "model": model
     })
-
 
 @app.route("/me")
 def me():
@@ -225,8 +218,7 @@ def build_pool(mode: str) -> List[str]:
         pool = _list_images("train") + _list_images("valid") + _list_images("test")
     else:  # default: valid_only
         pool = _list_images("valid")
-    # barajamos para aleatoriedad
-    random.shuffle(pool)
+    random.shuffle(pool)  # barajar
     return pool
 
 # ----------------- CAPTURA (SELECCIÓN ALEATORIA) -----------------
@@ -247,31 +239,24 @@ def capture_loop():
 
         while slot_idx < TOTAL_SLOTS:
             with lock:
-                # Si ya hemos llenado los 10 slots, paramos
                 if len(state["images"]) >= TOTAL_SLOTS:
                     state["running"] = False
                     state["stopped"] = True
                     break
 
             if not pool_remaining:
-                # Si ya no hay imágenes, terminamos
                 with lock:
                     state["running"] = False
                     state["stopped"] = True
                     state["error"] = "No quedan imágenes disponibles."
                 break
 
-            # Toma la primera imagen disponible (FIFO) o al azar, como prefieras
-            chosen = pool_remaining.pop(0)  # primera
-            # chosen = random.choice(pool_remaining)  # <- alternativa aleatoria
-            # pool_remaining.remove(chosen)
-
+            chosen = pool_remaining.pop(0)  # FIFO
             with lock:
                 state["images"].append(chosen)
                 slot_idx += 1
                 print(f"[DEBUG] Slot {slot_idx} cargado con {chosen}")
 
-            # Espera entre capturas (simula la cámara)
             time.sleep(CYCLE_SECONDS)
 
     except Exception as e:
@@ -279,7 +264,6 @@ def capture_loop():
             state["error"] = str(e)
             state["running"] = False
             state["stopped"] = True
-
 
 def ensure_thread():
     with lock:
@@ -291,12 +275,10 @@ def ensure_thread():
     return True
 
 # ----------------- RUTAS -----------------
-
 @app.route("/")
 @login_required
 def index():
     return render_template_string(front())
-
 
 @app.route("/state")
 def get_state():
@@ -305,7 +287,6 @@ def get_state():
         running = state["running"]
         stopped = state["stopped"]
         error = state["error"]
-    # Devolvemos URLs públicas con url_for, respetando rutas relativas bajo /static
     urls = [url_for('static', filename=rel_path) for rel_path in names]
     return jsonify({
         "images": urls,
@@ -315,13 +296,34 @@ def get_state():
         "mode": SPLIT_MODE
     })
 
+@app.route("/layers")
+def get_layers():
+    with lock:
+        return jsonify({
+            "current": state["layer_current"],
+            "total": state["layer_total"]
+        })
+
 @app.route("/start_capture", methods=["POST"])
 @login_required
 def start_capture():
     with lock:
+        # limpiar ciclo de imágenes
         state.update({"images": [], "running": False, "stopped": False, "error": None})
+        # subir capa al arrancar (una por ciclo de capturas)
+        if state["layer_current"] < state["layer_total"]:
+            state["layer_current"] += 1
+
+        lc = state["layer_current"]
+        lt = state["layer_total"]
+
     started = ensure_thread()
-    return jsonify({"status": "started" if started else "already_running", "mode": SPLIT_MODE})
+    return jsonify({
+        "status": "started" if started else "already_running",
+        "mode": SPLIT_MODE,
+        "layer_current": lc,
+        "layer_total": lt
+    })
 
 @app.route("/reset_capture", methods=["POST"])
 @login_required
@@ -329,6 +331,13 @@ def reset_capture():
     with lock:
         state.update({"images": [], "running": False, "stopped": False, "error": None})
     return jsonify({"status": "reset_done"})
+
+@app.route("/reset_layers", methods=["POST"])
+@login_required
+def reset_layers():
+    with lock:
+        state["layer_current"] = 0
+    return jsonify({"status": "layers_reset", "current": 0, "total": state["layer_total"]})
 
 # ----------------- MAIN -----------------
 if __name__ == "__main__":

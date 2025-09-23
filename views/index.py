@@ -1,3 +1,4 @@
+# views/index.py
 def front():
     return r"""
 <!DOCTYPE html>
@@ -43,21 +44,61 @@ def front():
     .main-content{position:relative;margin:20px 0 0 20px;border-radius:15px;overflow:hidden;background:linear-gradient(135deg,#000 0%,#1a1a1a 100%);border:3px solid #2a3f5f;display:flex;flex-direction:column}
     .video-header{background:rgba(0,0,0,.8);padding:10px 20px;display:flex;justify-content:space-between;align-items:center}
     .video-title{font-size:14px;font-weight:600;color:#00ff41}
-    .video-content{height:calc(100% - 50px);position:relative;background:linear-gradient(45deg,#000 0%,#0a0a0a 100%);display:flex;align-items:center;justify-content:center}
+    .video-stats{font-size:12px;color:#9aa7bd}
+
     .photo-library{background:linear-gradient(180deg,#1a1f3a 0%,#0f1419 100%);border-left:3px solid #ff0080;display:flex;flex-direction:column;margin:20px 20px 0 20px;border-radius:15px 0 0 0}
     .library-header{background:linear-gradient(135deg,#ff0080,#cc0066);padding:15px;color:#000;font-weight:bold;font-size:14px;text-align:center;text-transform:uppercase}
     .photos-container{flex:1;overflow-y:auto;padding:15px;max-height:calc(100vh - 250px)}
     .thumb-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
-    .thumb{width:100%;aspect-ratio:16/9;object-fit:cover;border-radius:8px;border:1px solid #223052;cursor:pointer;transition:.2s}
+    .thumb{
+      width:100%;
+      aspect-ratio:16/9;
+      object-fit: cover;
+      border-radius:8px;
+      border:1px solid #223052;
+      cursor:pointer;
+      transition:.2s
+    }
     .thumb:hover{transform:scale(1.02)}
     .bottom-status{grid-column:1/-1;background:#0a0e1a;padding:10px 30px;border-top:1px solid #2a3f5f;display:flex;justify-content:space-between;align-items:center}
-    .grid-wrap{width:min(1200px,96%);margin:16px auto}
+
+    /* === GRID 2×5 (slots grandes, alto fijo) === */
+    .grid-wrap{
+      position:relative;
+      width:min(1600px, 98%);
+      margin:16px auto;
+    }
     .gridTitle{font-size:13px;letter-spacing:.4px;color:#9dc0ff;opacity:.9;margin:8px 0 6px 8px}
-    .grid{display:grid;grid-template-columns:repeat(5,1fr);grid-auto-rows:1fr;gap:10px}
+
+    .grid{
+      position:relative; /* para que el overlay se ancle a este contenedor */
+      display:grid;
+      grid-template-columns:repeat(5,1fr);
+      grid-auto-rows:1fr;
+      gap:14px;
+    }
     .grid-row-2{direction:rtl;display:contents}
-    .cell{position:relative;aspect-ratio:16/9;background:#141821;border:1px solid #223052;border-radius:14px;overflow:hidden;display:grid;place-items:center}
-    .cell img{width:100%;height:100%;object-fit:cover;display:block}
+
+    .cell{
+      position:relative;
+      height:150px;               /* ⬅️ Alto fijo del slot */
+      background:#141821;
+      border:1px solid #223052;
+      border-radius:14px;
+      overflow:hidden;
+      display:grid;place-items:center
+    }
+
+    /* Capturas completas dentro del slot */
+    .cell img{
+      width:100%;
+      height:100%;
+      object-fit: contain;
+      display:block;
+      background:#000;
+    }
     .slot{opacity:.5;font-size:.9rem;color:#9aa7bd}
+
     .operator-info{display:flex;align-items:center;gap:20px}
     .operator-selector{display:flex;align-items:center;gap:15px;padding:8px 15px;border-radius:25px;background:rgba(0,255,65,.1)}
     .operator-avatar{width:45px;height:45px;background:linear-gradient(135deg,#00ff41,#00cc34);border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:bold;color:#000;font-size:16px}
@@ -76,6 +117,42 @@ def front():
     .modal-inner{position:relative;max-width:min(90vw,1200px);max-height:90vh}
     .modal-inner img{max-width:100%;max-height:90vh;border-radius:10px;border:2px solid #223052;display:block}
     .modal-close{position:absolute;top:-12px;right:-12px;background:#ff4d4d;border:none;border-radius:999px;width:36px;height:36px;color:#000;font-weight:900;font-size:18px;cursor:pointer}
+
+    /* === SCAN OVERLAY (crosshair + líneas animadas) === */
+    .scan-overlay{
+      position:absolute;
+      left:0; top:0;              /* ⬅️ Anclado al (0,0) del .grid */
+      pointer-events:none;
+      z-index:50;
+      transition: transform .35s ease, width .2s ease, height .2s ease, opacity .2s ease;
+      opacity:.95;
+      filter: drop-shadow(0 0 6px rgba(0,255,65,.35));
+    }
+    .scan-overlay.hidden{opacity:0;visibility:hidden}
+
+    .scan-center-h, .scan-center-v{ position:absolute; left:0; top:0; right:0; bottom:0; }
+    .scan-center-h::before, .scan-center-v::before{
+      content:""; position:absolute; background:#00ff41;
+      box-shadow:0 0 8px rgba(0,255,65,.6), 0 0 16px rgba(0,255,65,.25);
+    }
+    .scan-center-h::before{ left:0; right:0; top:50%; height:2px; transform:translateY(-1px); }
+    .scan-center-v::before{ top:0; bottom:0; left:50%; width:2px; transform:translateX(-1px); }
+
+    .scan-sweep-h, .scan-sweep-v{ position:absolute; inset:0; overflow:hidden }
+    .scan-sweep-h::after, .scan-sweep-v::after{
+      content:""; position:absolute; background:linear-gradient(90deg, rgba(0,255,65,0) 0%, rgba(0,255,65,.9) 50%, rgba(0,255,65,0) 100%);
+      mix-blend-mode:screen; filter:blur(0.2px);
+    }
+    .scan-sweep-h::after{ top:48%; height:4px; width:120%; animation: sweepX 2.2s linear infinite; }
+    .scan-sweep-v::after{
+      left:49%; width:4px; height:120%;
+      background:linear-gradient(180deg, rgba(0,255,65,0) 0%, rgba(0,255,65,.9) 50%, rgba(0,255,65,0) 100%);
+      animation: sweepY 2.6s linear infinite;
+    }
+    @keyframes sweepX { 0%{transform:translateX(-10%)} 50%{transform:translateX(-5%)} 100%{transform:translateX(110%)} }
+    @keyframes sweepY { 0%{transform:translateY(-10%)} 50%{transform:translateY(-5%)} 100%{transform:translateY(110%)} }
+
+    .scan-border{ position:absolute; inset:0; border:2px dashed rgba(0,255,65,.35); border-radius:12px; }
   </style>
 </head>
 <body>
@@ -100,8 +177,8 @@ def front():
     <div class="layer-section">
       <div class="section-label">Control de Capas</div>
       <div class="current-layer-display">
-        <div class="layer-number">18</div>
-        <div class="layer-total">de 32 capas</div>
+        <div class="layer-number" id="layerCurrent">0</div>
+        <div class="layer-total">de <span id="layerTotal">32</span> capas</div>
       </div>
     </div>
 
@@ -134,6 +211,7 @@ def front():
         <div class="action-buttons">
           <button id="startBtn" class="btn-small success" onclick="startCapture()">▶️ Arrancar</button>
           <button id="resetBtn" class="btn-small warn" onclick="resetCapture()">🧹 Reset</button>
+          <button class="btn-small warn" onclick="resetLayers()">🔁 Reset Capas</button>
         </div>
       </div>
 
@@ -151,10 +229,21 @@ def front():
           <div class="video-title">🎥 FEED EN VIVO - CÁMARA PRINCIPAL</div>
           <div class="video-stats">640×480 | 30 FPS | Flask Grid</div>
         </div>
+
         <!-- GRID 2×5 -->
         <div class="grid-wrap">
           <div class="gridTitle">📸 Capturas (2×5)</div>
-          <div class="grid" id="grid"></div>
+
+          <div class="grid" id="grid">
+            <!-- Overlay móvil que salta de slot a slot (dentro del grid) -->
+            <div id="scanOverlay" class="scan-overlay hidden" aria-hidden="true">
+              <div class="scan-border"></div>
+              <div class="scan-center-h"></div>
+              <div class="scan-center-v"></div>
+              <div class="scan-sweep-h"></div>
+              <div class="scan-sweep-v"></div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -209,30 +298,41 @@ def front():
 
   // Grid vacío inicial
   const grid = document.getElementById('grid');
-  function emptyGrid(){
-    grid.innerHTML='';
-    for(let i=0;i<5;i++){
-      const cell=document.createElement('div');
-      cell.className='cell';
-      const span=document.createElement('div');
-      span.className='slot';
-      span.textContent='Slot '+String(i+1).padStart(2,'0');
-      cell.appendChild(span);
-      grid.appendChild(cell);
-    }
-    const row2=document.createElement('div');
-    row2.className='grid-row-2';
-    for(let i=5;i<10;i++){
-      const cell=document.createElement('div');
-      cell.className='cell';
-      const span=document.createElement('div');
-      span.className='slot';
-      span.textContent='Slot '+String(i+1).padStart(2,'0');
-      cell.appendChild(span);
-      row2.appendChild(cell);
-    }
-    grid.appendChild(row2);
+  const scanOverlay = document.getElementById('scanOverlay');
+
+function emptyGrid(){
+  // conserva referencia al overlay existente
+  const overlay = document.getElementById('scanOverlay');
+  // limpia el grid SIN reparsear HTML
+  grid.textContent = '';
+  // el overlay siempre como primer hijo
+  grid.appendChild(overlay);
+
+  // primera fila (slots 1-5)
+  for(let i=0;i<5;i++){
+    const cell=document.createElement('div');
+    cell.className='cell';
+    const span=document.createElement('div');
+    span.className='slot';
+    span.textContent='Slot '+String(i+1).padStart(2,'0');
+    cell.appendChild(span);
+    grid.appendChild(cell);
   }
+  // segunda fila (slots 6-10) visualmente invertida
+  const row2=document.createElement('div');
+  row2.className='grid-row-2';
+  for(let i=5;i<10;i++){
+    const cell=document.createElement('div');
+    cell.className='cell';
+    const span=document.createElement('div');
+    span.className='slot';
+    span.textContent='Slot '+String(i+1).padStart(2,'0');
+    cell.appendChild(span);
+    row2.appendChild(cell);
+  }
+  grid.appendChild(row2);
+}
+
   emptyGrid();
 
   // Lightbox helpers
@@ -243,7 +343,6 @@ def front():
     lb.classList.remove('hidden');
   }
   function closeLightbox(ev){
-    // Evita que el click en la imagen cierre el modal
     if(ev && ev.target && ev.target.id === 'lightboxImg') return;
     document.getElementById('lightbox').classList.add('hidden');
   }
@@ -262,16 +361,47 @@ def front():
     });
   }
 
+  // Helpers overlay
+  function getCellAt(index){
+    const cells = grid.querySelectorAll('.cell');
+    return cells[index] || null;
+  }
+
+  function moveScanOverlayToCell(index){
+    const cell = getCellAt(index);
+    if(!cell){ hideScanOverlay(); return; }
+
+    // Rectángulos de referencia respecto a .grid
+    const refRect  = grid.getBoundingClientRect();
+    const cellRect = cell.getBoundingClientRect();
+
+    const w  = cellRect.width;
+    const h  = cellRect.height;
+    const dx = cellRect.left - refRect.left;
+    const dy = cellRect.top  - refRect.top;
+
+    scanOverlay.style.width  = w + 'px';
+    scanOverlay.style.height = h + 'px';
+    scanOverlay.style.transform = `translate3d(${dx}px, ${dy}px, 0)`;
+    scanOverlay.classList.remove('hidden');
+  }
+
+  function hideScanOverlay(){
+    scanOverlay.classList.add('hidden');
+  }
+
   // Polling
   let poller = null;
+  let lastActiveIndex = -1;
 
   async function fetchState(){
     try{
       const res=await fetch('/state');
       const data=await res.json();
 
-      // Render grid 2×5
-      const cells=grid.querySelectorAll('.cell');
+      // Render grid 2×5 (mantiene overlay en primer hijo)
+      // Recolecta celdas sin tocar el overlay
+      const cells=Array.from(grid.querySelectorAll('.cell'));
       for(let i=0;i<10;i++){
         const cell=cells[i];
         cell.innerHTML='';
@@ -288,13 +418,33 @@ def front():
         }
       }
 
-      // Render biblioteca de capturas
+      // Render biblioteca
       renderLibrary(data.images);
+
+      // Slot activo
+      let activeIndex = (data.running && data.images.length>0)
+                        ? Math.min(data.images.length-1, 9)
+                        : -1;
+
+      if(activeIndex !== -1){
+        if(activeIndex !== lastActiveIndex){
+          moveScanOverlayToCell(activeIndex);
+          lastActiveIndex = activeIndex;
+        }else{
+          // Recalcula por si cambia tamaño
+          moveScanOverlayToCell(activeIndex);
+        }
+      }else{
+        hideScanOverlay();
+        lastActiveIndex = -1;
+      }
 
       if(data.stopped){ stopPolling(); }
     }catch(e){
       console.warn('Error fetch /state',e);
       stopPolling();
+      hideScanOverlay();
+      lastActiveIndex = -1;
     }
   }
 
@@ -309,7 +459,30 @@ def front():
     if (poller) { clearInterval(poller); poller = null; }
   }
 
-  function clearGrid() { emptyGrid(); renderLibrary([]); }
+  function clearGrid() {
+    // limpia pero conserva overlay
+    const cells = grid.querySelectorAll('.cell');
+    cells.forEach((cell, i)=>{
+      cell.innerHTML='';
+      const span=document.createElement('div');
+      span.className='slot';
+      span.textContent='Slot '+String(i+1).padStart(2,'0');
+      cell.appendChild(span);
+    });
+    renderLibrary([]);
+    hideScanOverlay();
+    lastActiveIndex=-1;
+  }
+
+  // Capas: refresco puntual
+  async function refreshLayersOnce() {
+    try {
+      const r = await fetch('/layers');
+      const j = await r.json();
+      document.getElementById('layerCurrent').textContent = j.current ?? 0;
+      document.getElementById('layerTotal').textContent = j.total ?? 0;
+    } catch(e) { console.warn('layers', e); }
+  }
 
   // Botones
   async function startCapture() {
@@ -321,6 +494,13 @@ def front():
       const res = await fetch('/start_capture', { method: 'POST' });
       if (!res.ok) throw new Error('HTTP ' + res.status);
       const data = await res.json();
+
+      if (data.layer_current !== undefined) {
+        document.getElementById('layerCurrent').textContent = data.layer_current;
+      }
+      if (data.layer_total !== undefined) {
+        document.getElementById('layerTotal').textContent = data.layer_total;
+      }
 
       if (data.status === 'started' || data.status === 'already_running') {
         if (startBtn) { startBtn.textContent = '✅ Captura en marcha'; }
@@ -345,8 +525,8 @@ def front():
       const data = await res.json();
 
       if (data.status === 'reset_done') {
-        stopPolling();     // detenemos refresco
-        clearGrid();       // limpiamos UI
+        stopPolling();
+        clearGrid();
         if (startBtn) { startBtn.disabled = false; startBtn.textContent = '▶️ Arrancar'; }
         if (resetBtn) { resetBtn.textContent = '🧹 Reset'; }
       } else {
@@ -360,8 +540,22 @@ def front():
     }
   }
 
+  async function resetLayers(){
+    try{
+      const r = await fetch('/reset_layers', {method:'POST'});
+      const j = await r.json();
+      if(j.status === 'layers_reset'){
+        document.getElementById('layerCurrent').textContent = j.current ?? 0;
+        document.getElementById('layerTotal').textContent = j.total ?? 0;
+      }
+    }catch(e){ console.warn('reset_layers', e); }
+  }
+
+  // Inicialización
   fillOperator();
-  // Polling se inicia al pulsar "Arrancar"
+  refreshLayersOnce();   // pinta contador al cargar
+  // El polling se inicia al pulsar "Arrancar"
+
   </script>
 
 </body>
