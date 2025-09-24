@@ -98,10 +98,20 @@
         </div>
       </div>
     </div>
-
+    
     <div class="photo-library">
       <div class="library-header">BIBLIOTECA DE CAPTURAS</div>
       <div class="photos-container">
+        <div class="library-controls" style="display:flex;gap:12px;align-items:center;margin-bottom:8px;">
+          <label for="layerFilter" style="font-size:14px;opacity:.8">Filtrar por capa:</label>
+          <select id="layerFilter" class="btn-small" style="min-width:110px;"></select>
+          <button id="refreshLibraryBtn" class="btn-small">🔄 Actualizar</button>
+          <button id="deleteLayerBtn" class="btn-small warn">🗑️ Borrar capa</button>
+          <label style="display:flex;align-items:center;gap:6px;font-size:12px;opacity:.8">
+            <input type="checkbox" id="deleteFilesChk"> borrar archivos
+          </label>
+          <div id="layerCountInfo" style="font-size:12px;opacity:.7"></div>
+        </div>
         <div id="thumbs" class="thumb-grid"></div>
       </div>
     </div>

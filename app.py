@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 # app.py — UI ATL + grid 2x5 + Login (SQLite) + Botón Arrancar + Botón Reset
-# Dataset-aware (train/valid/test): elige imágenes al azar del split elegido,
-# valida que tengan su etiqueta en labels y descarta las que no.
-# + Contador de capas: sube +1 en cada "Arrancar" hasta el total.
+# Simulación: usa static/dataset/valid/images como fuente de "capturas".
+# Cada captura se COPY a static/layers/layer_<n>/... para la biblioteca por capas.
+# Nunca se modifica/borra el dataset original.
 
 import os
 import time
 import threading
 import random
 import sqlite3
+import shutil
+from uuid import uuid4
 from typing import List
 
 import psutil
@@ -19,39 +21,39 @@ from flask import (
 from werkzeug.security import generate_password_hash, check_password_hash
 from functools import wraps
 
+# ----------------- APP (debe ir primero) -----------------
+app = Flask(__name__, static_folder="static")
+SECRET_DEFAULT = "dev-secret-change-me"
+app.secret_key = os.environ.get("FLASK_SECRET", SECRET_DEFAULT)
+
 # ----------------- CONFIG -----------------
-# Cámara (queda desactivada para el futuro)
+# Cámara (desactivada en esta versión)
 CAM_INDEX = 0
 WIDTH, HEIGHT = 640, 480
 FPS = 30
 
 # Dataset Roboflow exportado bajo static/dataset
 DATASET_DIR = os.path.join("static", "dataset")
-
-# Cómo seleccionar las imágenes:
-# - "valid_only" (por defecto)
-# - "train_only"
-# - "test_only"
-# - "all" (mezcla los tres)
+# Para simulación tomamos SIEMPRE de valid/images
 SPLIT_MODE = os.environ.get("SPLIT_MODE", "valid_only").lower()
 
-# Validación mínima: exigir que exista el .txt de labels con el mismo stem
-REQUIRE_LABEL = True
+# En simulación NO exigimos labels
+REQUIRE_LABEL = False  # <- si quieres forzar labels, pon True y usa fallback más abajo
 
 TOTAL_SLOTS = 10      # 2×5
-CYCLE_SECONDS = 2     # ritmo de selección
+CYCLE_SECONDS = 2     # ritmo de selección (segundos entre slots)
 
 DB_PATH = "users.db"
-SECRET_DEFAULT = "dev-secret-change-me"
 
 # Capas
 LAYER_TOTAL = int(os.environ.get("LAYER_TOTAL", "32"))
-# -----------------------------------------
 
-app = Flask(__name__, static_folder="static")
-app.secret_key = os.environ.get("FLASK_SECRET", SECRET_DEFAULT)
+# Carpeta segura para COPIAS por capa (biblioteca)
+LAYERS_ROOT_REL = os.path.join("layers")                 # relativo a /static
+LAYERS_ROOT_ABS = os.path.join(app.static_folder, LAYERS_ROOT_REL)
+os.makedirs(LAYERS_ROOT_ABS, exist_ok=True)
 
-# Estado compartido
+# ----------------- ESTADO -----------------
 state = {
     "images": [],       # rutas RELATIVAS a /static (ej: 'dataset/valid/images/xxx.jpg')
     "running": False,
@@ -79,6 +81,17 @@ def init_db():
         password_hash TEXT NOT NULL
     );
     """)
+    # Tabla de capturas (guardamos la RUTA DE LA COPIA bajo static/layers/…)
+    conn.execute("""
+    CREATE TABLE IF NOT EXISTS captures (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        path TEXT NOT NULL,        -- ruta relativa servible por /static (p.ej: layers/layer_3/abcd.jpg)
+        layer INTEGER NOT NULL,    -- nº de capa (1..N)
+        split TEXT NOT NULL,       -- 'valid_only' (o el split activo)
+        ts INTEGER NOT NULL        -- epoch seconds
+    );
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_captures_layer_ts ON captures(layer, ts DESC);")
     conn.commit()
     conn.close()
 
@@ -106,13 +119,7 @@ def login_required(fn):
         return fn(*args, **kwargs)
     return wrapper
 
-# from views.login_user import log   # ❌ quita esto
-
-from flask import (
-    Flask, jsonify, render_template,  # ✅ ya usas render_template
-    session, redirect, request, url_for
-)
-
+# ----------------- LOGIN -----------------
 @app.route("/login", methods=["GET", "POST"])
 def login():
     next_url = request.values.get("next") or "/"
@@ -127,10 +134,9 @@ def login():
             session["user_email"] = user["email"]
             return redirect(next_url)
         else:
-            return render_template("login.html", error="Credenciales inválidas", next_url=next_url)  # ✅
+            return render_template("login.html", error="Credenciales inválidas", next_url=next_url)
     else:
-        return render_template("login.html", error=None, next_url=next_url)  # ✅
-
+        return render_template("login.html", error=None, next_url=next_url)
 
 @app.route("/logout")
 def logout():
@@ -140,18 +146,11 @@ def logout():
 # ----------------- SISTEMA -----------------
 @app.route("/system")
 def get_system_info():
-    """
-    Devuelve información del sistema: CPU, RAM, GPU (si disponible)
-    """
-    # CPU usage
     cpu_percent = psutil.cpu_percent(interval=None)
-
-    # RAM
     ram = psutil.virtual_memory()
-    ram_used = round(ram.used / (1024 ** 3), 2)   # en GB
-    ram_total = round(ram.total / (1024 ** 3), 2) # en GB
+    ram_used = round(ram.used / (1024 ** 3), 2)
+    ram_total = round(ram.total / (1024 ** 3), 2)
 
-    # GPU (opcional: si tienes NVIDIA y pynvml instalado)
     try:
         import pynvml
         pynvml.nvmlInit()
@@ -163,7 +162,6 @@ def get_system_info():
         gpu_name = "N/A"
         gpu_util = None
 
-    # Modelo actual (split que estás usando)
     model = SPLIT_MODE.upper()
 
     return jsonify({
@@ -185,15 +183,14 @@ def me():
         "role": session["user_role"]
     })
 
-# ----------------- DATASET UTILS -----------------
-def _labels_dir_for(split: str) -> str:
-    return os.path.join(DATASET_DIR, split, "labels")
-
+# ----------------- DATASET UTILS (SIMULACIÓN) -----------------
 def _images_dir_for(split: str) -> str:
     return os.path.join(DATASET_DIR, split, "images")
 
+def _labels_dir_for(split: str) -> str:
+    return os.path.join(DATASET_DIR, split, "labels")
+
 def _has_label(split: str, image_filename: str) -> bool:
-    """Comprueba si existe el .txt correspondiente en labels."""
     if not REQUIRE_LABEL:
         return True
     stem, _ = os.path.splitext(image_filename)
@@ -201,19 +198,33 @@ def _has_label(split: str, image_filename: str) -> bool:
     return os.path.isfile(label_path)
 
 def _list_images(split: str) -> List[str]:
-    """Devuelve rutas relativas (desde static/) de imágenes válidas del split."""
+    """
+    Devuelve rutas relativas (desde static/) de imágenes válidas del split.
+    En simulación tomamos TODAS las de valid/images aunque no haya labels.
+    """
     img_dir = _images_dir_for(split)
     if not os.path.isdir(img_dir):
         return []
-    out = []
+    with_label = []
+    all_imgs = []
     for f in os.listdir(img_dir):
-        if f.lower().endswith((".jpg", ".jpeg", ".png")) and _has_label(split, f):
-            rel = os.path.join("dataset", split, "images", f)  # relativo a /static
-            out.append(rel.replace("\\", "/"))
-    return out
+        if f.lower().endswith((".jpg", ".jpeg", ".png")):
+            rel = os.path.join("dataset", split, "images", f).replace("\\", "/")
+            all_imgs.append(rel)
+            if _has_label(split, f):
+                with_label.append(rel)
+
+    # Fallback: si pedimos labels y no hay ninguna, usa todas (modo demo)
+    if REQUIRE_LABEL and not with_label and all_imgs:
+        print(f"[WARN] No hay imágenes con label en '{split}'. Usando TODAS para simulación.")
+        return all_imgs
+
+    return with_label if REQUIRE_LABEL else all_imgs
 
 def build_pool(mode: str) -> List[str]:
-    """Construye el pool según el modo (valid_only/train_only/test_only/all)."""
+    """
+    Construye el pool. En nuestra simulación el modo por defecto es 'valid_only'.
+    """
     mode = (mode or "").lower()
     if mode == "train_only":
         pool = _list_images("train")
@@ -221,26 +232,57 @@ def build_pool(mode: str) -> List[str]:
         pool = _list_images("test")
     elif mode == "all":
         pool = _list_images("train") + _list_images("valid") + _list_images("test")
-    else:  # default: valid_only
-        pool = _list_images("valid")
-    random.shuffle(pool)  # barajar
+    else:
+        pool = _list_images("valid")  # simulación principal
+    print(f"[INFO] SPLIT_MODE={mode} -> {len(pool)} imágenes en pool")
+    random.shuffle(pool)
     return pool
+
+# ----------------- PERSISTENCIA DE CAPTURAS (COPIA A layers/) -----------------
+def save_capture(path_rel_src: str, layer: int, split: str):
+    """
+    Crea una COPIA de la imagen del dataset en static/layers/layer_<layer>/uuid.ext
+    y guarda en DB la ruta de la COPIA (relativa a /static).
+    El dataset original (static/dataset/...) no se toca nunca.
+    """
+    src_abs = os.path.join(app.static_folder, path_rel_src)
+    if not os.path.isfile(src_abs):
+        raise FileNotFoundError(f"Fuente no encontrada: {src_abs}")
+
+    ext = os.path.splitext(src_abs)[1].lower() or ".jpg"
+    dst_dir_rel = os.path.join(LAYERS_ROOT_REL, f"layer_{int(layer)}")
+    dst_dir_abs = os.path.join(app.static_folder, dst_dir_rel)
+    os.makedirs(dst_dir_abs, exist_ok=True)
+
+    dst_name = f"{uuid4().hex}{ext}"
+    dst_rel = os.path.join(dst_dir_rel, dst_name).replace("\\", "/")
+    dst_abs = os.path.join(app.static_folder, dst_rel)
+
+    shutil.copy2(src_abs, dst_abs)
+
+    conn = get_db()
+    conn.execute(
+        "INSERT INTO captures (path, layer, split, ts) VALUES (?,?,?, strftime('%s','now'))",
+        (dst_rel, int(layer), (split or '').lower())
+    )
+    conn.commit()
+    conn.close()
 
 # ----------------- CAPTURA (SELECCIÓN ALEATORIA) -----------------
 def capture_loop():
     """
-    Selecciona imágenes 1 a 1 desde el dataset y las coloca en cada slot
-    hasta llenar los 10. No se repiten imágenes dentro de un ciclo.
+    Simulación: selecciona imágenes desde el dataset y las coloca en el grid.
+    Además, cada selección se copia a layers/layer_<n>/... y se registra en DB.
     """
     try:
         pool_remaining = build_pool(SPLIT_MODE)
         if not pool_remaining:
             raise RuntimeError(
                 f"No hay imágenes válidas en '{SPLIT_MODE}'. "
-                f"Revisa la estructura en {DATASET_DIR}/<split>/images + labels"
+                f"Revisa static/dataset/valid/images"
             )
 
-        slot_idx = 0  # índice para controlar en qué slot estamos
+        slot_idx = 0
 
         while slot_idx < TOTAL_SLOTS:
             with lock:
@@ -256,11 +298,18 @@ def capture_loop():
                     state["error"] = "No quedan imágenes disponibles."
                 break
 
-            chosen = pool_remaining.pop(0)  # FIFO
+            chosen = pool_remaining.pop(0)  # ruta relativa al dataset (para el grid)
             with lock:
                 state["images"].append(chosen)
+                current_layer = state["layer_current"]
                 slot_idx += 1
                 print(f"[DEBUG] Slot {slot_idx} cargado con {chosen}")
+
+            # Guardar COPIA para biblioteca (fuera del lock)
+            try:
+                save_capture(chosen, current_layer, SPLIT_MODE)
+            except Exception as e:
+                print(f"[WARN] No se pudo guardar la captura en DB: {e}")
 
             time.sleep(CYCLE_SECONDS)
 
@@ -275,6 +324,9 @@ def ensure_thread():
         if state["running"]:
             return False
         state["running"] = True
+        state["stopped"] = False
+        state["error"] = None
+        state["images"] = []
     t = threading.Thread(target=capture_loop, daemon=True)
     t.start()
     return True
@@ -313,9 +365,9 @@ def get_layers():
 @login_required
 def start_capture():
     with lock:
-        # limpiar ciclo de imágenes
+        # limpiar ciclo para el grid
         state.update({"images": [], "running": False, "stopped": False, "error": None})
-        # subir capa al arrancar (una por ciclo de capturas)
+        # subir capa al arrancar (una por ciclo)
         if state["layer_current"] < state["layer_total"]:
             state["layer_current"] += 1
 
@@ -343,6 +395,104 @@ def reset_layers():
     with lock:
         state["layer_current"] = 0
     return jsonify({"status": "layers_reset", "current": 0, "total": state["layer_total"]})
+
+# --- Biblioteca: SOLO devuelve copias bajo static/layers/ ---
+@app.route("/library")
+@login_required
+def library():
+    """
+    Devuelve imágenes de la biblioteca filtradas por capa (copias en layers/).
+    Query params:
+      - layer: int (opcional; 0 o None => todas las capas)
+      - limit: int (opcional, por defecto 200)
+    """
+    layer = request.args.get("layer", type=int)
+    limit = request.args.get("limit", 200, type=int)
+    conn = get_db()
+    if layer is None or layer == 0:
+        rows = conn.execute(
+            "SELECT path FROM captures WHERE path LIKE ? ORDER BY ts DESC LIMIT ?",
+            (f"{LAYERS_ROOT_REL}/%", limit)
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT path FROM captures WHERE layer=? AND path LIKE ? ORDER BY ts DESC LIMIT ?",
+            (layer, f"{LAYERS_ROOT_REL}/%", limit)
+        ).fetchall()
+    conn.close()
+    urls = [url_for('static', filename=row[0]) for row in rows]
+    return jsonify({"images": urls, "layer": layer or 0})
+
+@app.route("/layers_summary")
+@login_required
+def layers_summary():
+    conn = get_db()
+    rows = conn.execute("""
+        SELECT layer, COUNT(*) AS n
+        FROM captures
+        GROUP BY layer
+        ORDER BY layer ASC
+    """).fetchall()
+    conn.close()
+    return jsonify({"layers": [{"layer": r[0], "count": r[1]} for r in rows]})
+
+# --- Borrado seguro por capa (solo copias bajo layers/) ---
+@app.route("/library/delete_layer", methods=["POST"])
+@login_required
+def library_delete_layer():
+    """
+    Borra todas las capturas de una capa en DB y, opcionalmente, los archivos físicos.
+    Solo borra archivos si están bajo static/layers/ (nunca static/dataset/).
+    Body JSON: { "layer": int, "delete_files": bool }
+    """
+    data = request.get_json(silent=True) or {}
+    layer = data.get("layer", None)
+    delete_files = bool(data.get("delete_files", False))
+
+    if layer is None:
+        return jsonify({"error": "layer requerido"}), 400
+    try:
+        layer = int(layer)
+        if layer <= 0:
+            return jsonify({"error": "layer debe ser un entero > 0"}), 400
+    except Exception:
+        return jsonify({"error": "layer inválido"}), 400
+
+    conn = get_db()
+
+    files_to_delete = []
+    if delete_files:
+        rows = conn.execute(
+            "SELECT path FROM captures WHERE layer=?",
+            (layer,)
+        ).fetchall()
+        for (rel_path,) in rows:
+            rel_norm = (rel_path or "").replace("\\", "/")
+            if rel_norm.startswith(f"{LAYERS_ROOT_REL}/"):
+                files_to_delete.append(rel_norm)
+
+    cur = conn.execute("DELETE FROM captures WHERE layer=?", (layer,))
+    deleted = cur.rowcount or 0
+    conn.commit()
+    conn.close()
+
+    files_removed = 0
+    if delete_files and files_to_delete:
+        for rel in files_to_delete:
+            try:
+                abs_path = os.path.join(app.static_folder, rel)
+                if os.path.isfile(abs_path):
+                    os.remove(abs_path)
+                    files_removed += 1
+            except Exception as e:
+                print(f"[WARN] No se pudo borrar {rel}: {e}")
+
+    return jsonify({
+        "status": "ok",
+        "layer": layer,
+        "deleted_db": deleted,
+        "deleted_files": files_removed if delete_files else None
+    })
 
 # ----------------- MAIN -----------------
 if __name__ == "__main__":
