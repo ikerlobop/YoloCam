@@ -13,14 +13,11 @@ from typing import List
 
 import psutil
 from flask import (
-    Flask, jsonify, render_template_string,
+    Flask, jsonify, render_template,
     session, redirect, request, url_for
 )
 from werkzeug.security import generate_password_hash, check_password_hash
 from functools import wraps
-
-from views.index import front
-from views.login_user import log
 
 # ----------------- CONFIG -----------------
 # Cámara (queda desactivada para el futuro)
@@ -109,6 +106,13 @@ def login_required(fn):
         return fn(*args, **kwargs)
     return wrapper
 
+# from views.login_user import log   # ❌ quita esto
+
+from flask import (
+    Flask, jsonify, render_template,  # ✅ ya usas render_template
+    session, redirect, request, url_for
+)
+
 @app.route("/login", methods=["GET", "POST"])
 def login():
     next_url = request.values.get("next") or "/"
@@ -123,9 +127,10 @@ def login():
             session["user_email"] = user["email"]
             return redirect(next_url)
         else:
-            return render_template_string(log(), error="Credenciales inválidas", next_url=next_url)
+            return render_template("login.html", error="Credenciales inválidas", next_url=next_url)  # ✅
     else:
-        return render_template_string(log(), error=None, next_url=next_url)
+        return render_template("login.html", error=None, next_url=next_url)  # ✅
+
 
 @app.route("/logout")
 def logout():
@@ -278,7 +283,7 @@ def ensure_thread():
 @app.route("/")
 @login_required
 def index():
-    return render_template_string(front())
+    return render_template("index.html")
 
 @app.route("/state")
 def get_state():

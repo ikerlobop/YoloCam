@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>ATL RDT Control System</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+</head>
+<body>
+  <!-- Sidebar -->
+  <div class="sidebar">
+    <div class="sidebar-header">
+      <div class="system-title">ATL RDT SYSTEM</div>
+      <div class="system-subtitle">Quality Control Interface</div>
+    </div>
+
+    <div class="project-section">
+      <div class="section-label">Proyecto Activo</div>
+      <div class="project-name">WING_A320_COMPOSITE_v3.2</div>
+      <div class="info-grid">
+        <div class="info-item"><div class="info-label">Máquina</div><div class="info-value">ATL-05</div></div>
+        <div class="info-item"><div class="info-label">Bobina</div><div class="info-value">CF-945</div></div>
+        <div class="info-item"><div class="info-label">Material</div><div class="info-value">T800-CF</div></div>
+        <div class="info-item"><div class="info-label">Lote</div><div class="info-value">L-240919</div></div>
+      </div>
+    </div>
+
+    <div class="layer-section">
+      <div class="section-label">Control de Capas</div>
+      <div class="current-layer-display">
+        <div class="layer-number" id="layerCurrent">0</div>
+        <div class="layer-total">de <span id="layerTotal">32</span> capas</div>
+      </div>
+    </div>
+
+    <div class="position-section">
+      <div class="section-label">Posición ATL en Tiempo Real</div>
+      <div class="position-display">
+        <div class="position-title">Coordenadas Máquina</div>
+        <div class="position-grid">
+          <div class="position-item"><div class="position-axis">X</div><div class="position-value" id="posX">1456.8</div><div class="position-unit">mm</div></div>
+          <div class="position-item"><div class="position-axis">Y</div><div class="position-value" id="posY">2134.7</div><div class="position-unit">mm</div></div>
+          <div class="position-item"><div class="position-axis">Z</div><div class="position-value" id="posZ">18.5</div><div class="position-unit">mm</div></div>
+          <div class="position-item"><div class="position-axis">U</div><div class="position-value" id="posU">45.2</div><div class="position-unit">°</div></div>
+        </div>
+        <div class="position-status"><div class="status-dot-position"></div>Sistema de posicionamiento ATL activo</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Área principal -->
+  <div class="main-area">
+    <div class="top-bar">
+      <div class="operator-info">
+        <div class="operator-selector">
+          <div class="operator-avatar">OP</div>
+          <div>
+            <div class="operator-name">Operario</div>
+            <div class="operator-role">—</div>
+          </div>
+        </div>
+        <div class="action-buttons">
+          <button id="startBtn" class="btn-small success">▶️ Arrancar</button>
+          <button id="resetBtn" class="btn-small warn">🧹 Reset</button>
+          <button id="resetLayersBtn" class="btn-small warn">🔁 Reset Capas</button>
+        </div>
+      </div>
+
+      <div class="controls-section"></div>
+
+      <div class="time-and-logout">
+        <button class="logout-btn" onclick="window.location.href='/logout'">Cerrar sesión</button>
+        <div class="time-display" id="currentTime">--:--:--</div>
+      </div>
+    </div>
+
+    <div class="main-content">
+      <div class="main-display">
+        <div class="video-header">
+          <div class="video-title">FEED EN VIVO - CÁMARA PRINCIPAL</div>
+          <div class="video-stats">640×480 | 30 FPS | Flask Grid</div>
+        </div>
+
+        <!-- GRID 2×5 -->
+        <div class="grid-wrap">
+          <div class="gridTitle">Capturas (2×5)</div>
+
+          <div class="grid" id="grid">
+            <!-- Overlay móvil que salta de slot a slot (dentro del grid) -->
+            <div id="scanOverlay" class="scan-overlay hidden" aria-hidden="true">
+              <div class="scan-border"></div>
+              <div class="scan-center-h"></div>
+              <div class="scan-center-v"></div>
+              <div class="scan-sweep-h"></div>
+              <div class="scan-sweep-v"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="photo-library">
+      <div class="library-header">BIBLIOTECA DE CAPTURAS</div>
+      <div class="photos-container">
+        <div id="thumbs" class="thumb-grid"></div>
+      </div>
+    </div>
+
+    <div class="bottom-status">
+      <div style="font-size:12px;opacity:.8">Estado UI: solo-grid</div>
+      <div class="system-performance">GPU: — | CPU: — | RAM: — | Modelo: —</div>
+    </div>
+  </div>
+
+  <!-- Lightbox -->
+  <div id="lightbox" class="modal hidden" onclick="closeLightbox(event)">
+    <div class="modal-inner">
+      <img id="lightboxImg" alt="Vista ampliada">
+      <button class="modal-close" onclick="closeLightbox(event)">×</button>
+    </div>
+  </div>
+
+  <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>
