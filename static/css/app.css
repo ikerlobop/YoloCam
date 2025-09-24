@@ -656,3 +656,44 @@ body{
 .thumb-wrap{
   position:relative;
 }
+
+/* === Marcador de centro y etiqueta en el feed === */
+.center-marker{
+  position:absolute;
+  width:14px; height:14px;
+  border:2px solid #00e0ff;
+  border-radius:50%;
+  box-shadow:0 0 8px rgba(0,224,255,.6);
+  pointer-events:none;
+}
+
+.center-marker::before,
+.center-marker::after{
+  content:"";
+  position:absolute;
+  left:50%; top:50%;
+  background:#00e0ff;
+  transform:translate(-50%,-50%);
+}
+
+.center-marker::before{
+  width:2px; height:16px;   /* línea vertical */
+}
+
+.center-marker::after{
+  width:16px; height:2px;   /* línea horizontal */
+}
+
+.center-label{
+  position:absolute;
+  background:rgba(0,0,0,.65);
+  color:#e6f9ff;
+  font-size:11px;
+  font-weight:700;
+  padding:4px 6px;
+  border:1px solid rgba(0,224,255,.5);
+  border-radius:6px;
+  pointer-events:none;
+  white-space:nowrap;
+  backdrop-filter: blur(2px);
+}

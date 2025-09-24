@@ -59,8 +59,24 @@ function emptyGrid() {
 }
 emptyGrid();
 
-// ======= Lightbox =======
+// ======= Simulación de posición máquina para el feed =======
+const SIM_POS = {
+  Y_MM: 180,   // fijo como acordamos
+  X0: 0,
+  Z0: 0,
+  X_STEP: 50,  // mm entre columnas
+  Z_STEP: 30   // mm entre filas
+};
+function simXZForSlot(slotIndex) {
+  const col = slotIndex % 5;           // 0..4
+  const row = slotIndex < 5 ? 0 : 1;   // 0..1
+  return {
+    X: SIM_POS.X0 + col * SIM_POS.X_STEP,
+    Z: SIM_POS.Z0 + row * SIM_POS.Z_STEP
+  };
+}
 
+// ======= Lightbox =======
 // guardamos boxes actuales para recolocarlos en resize
 let _lbBoxes = [];
 function openLightbox(itemOrUrl) {
@@ -98,14 +114,7 @@ function closeLightbox(ev) {
 }
 
 // ======= Helpers de overlay de BBoxes (grid/thumb) =======
-
-/**
- * Crea (si no existe) y devuelve un contenedor overlay relativo al área real que ocupa la imagen
- * dentro del cell/thumbnail cuando object-fit=contain.
- * Devuelve {layer, left, top, width, height} en px relativo al cell.
- */
 function getOrCreateBBoxLayerForImg(cell, img) {
-  // Medidas del contenedor (cell) y naturales de la imagen
   const cellRect = cell.getBoundingClientRect();
   const cw = cellRect.width;
   const ch = cellRect.height;
@@ -113,7 +122,6 @@ function getOrCreateBBoxLayerForImg(cell, img) {
   const iw = img.naturalWidth || 1;
   const ih = img.naturalHeight || 1;
 
-  // Escala tipo contain
   const scale = Math.min(cw / iw, ch / ih);
   const dispW = iw * scale;
   const dispH = ih * scale;
@@ -121,7 +129,6 @@ function getOrCreateBBoxLayerForImg(cell, img) {
   const offsetX = (cw - dispW) / 2;
   const offsetY = (ch - dispH) / 2;
 
-  // layer
   let layer = cell.querySelector('.bbox-layer');
   if (!layer) {
     layer = document.createElement('div');
@@ -132,17 +139,11 @@ function getOrCreateBBoxLayerForImg(cell, img) {
   layer.style.top = offsetY + 'px';
   layer.style.width = dispW + 'px';
   layer.style.height = dispH + 'px';
-
-  // limpia cajas previas
-  layer.innerHTML = '';
+  layer.innerHTML = ''; // limpiar
 
   return { layer, left: offsetX, top: offsetY, width: dispW, height: dispH };
 }
 
-/**
- * Dibuja cajas normalizadas YOLO sobre el layer.
- * boxes: [{cls, xc, yc, w, h}]
- */
 function drawBoxesOnLayer(layer, boxes) {
   if (!boxes || !boxes.length) return;
   for (const b of boxes) {
@@ -153,6 +154,7 @@ function drawBoxesOnLayer(layer, boxes) {
 
     const left = (xc - w/2) * 100;
     const top  = (yc - h/2) * 100;
+
     const box = document.createElement('div');
     box.className = 'bbox';
     box.style.left = left + '%';
@@ -160,7 +162,6 @@ function drawBoxesOnLayer(layer, boxes) {
     box.style.width = (w * 100) + '%';
     box.style.height = (h * 100) + '%';
 
-    // etiqueta
     const label = document.createElement('div');
     label.className = 'bbox-label';
     label.textContent = (typeof b.cls === 'number' ? `C${b.cls}` : '');
@@ -170,7 +171,6 @@ function drawBoxesOnLayer(layer, boxes) {
   }
 }
 
-// Para casos en que la imagen aún no está cargada
 function drawBoxesForCellWhenReady(cell, img, boxes) {
   const draw = () => {
     const frame = getOrCreateBBoxLayerForImg(cell, img);
@@ -214,7 +214,6 @@ function layoutLightboxOverlayAndDraw() {
   drawBoxesOnLayer(overlay, _lbBoxes);
 }
 
-// recomponer overlay al redimensionar ventana
 window.addEventListener('resize', () => {
   const lb = document.getElementById('lightbox');
   if (lb && !lb.classList.contains('hidden')) {
@@ -235,11 +234,13 @@ function renderLibrary(dataOrUrls) {
   for (const it of items) {
     const wrap = document.createElement('div');
     wrap.className = 'thumb-wrap';
+
     const img = document.createElement('img');
     img.className = 'thumb';
     img.src = it.url + '?t=' + Date.now();
     img.alt = 'Captura';
-    img.addEventListener('click', () => openLightbox(it));  // <-- pasa también boxes
+
+    img.addEventListener('click', () => openLightbox(it));
     wrap.appendChild(img);
     thumbs.appendChild(wrap);
 
@@ -262,7 +263,6 @@ async function loadLibraryForSelectedLayer() {
   const chosen = sel ? parseInt(sel.value || '0', 10) : 0;
   try {
     const data = await fetchLibraryByLayer(chosen);
-    // Preferimos items (con cajas). Si no, caemos a images.
     if (data.items && data.items.length) {
       renderLibrary(data.items);
     } else {
@@ -274,6 +274,40 @@ async function loadLibraryForSelectedLayer() {
     console.warn('library error', e);
     renderLibrary([]);
   }
+}
+
+// ======= Marcador de centro + coordenadas simuladas =======
+function addCenterMarkerForCell(cell, img, labelText) {
+  // Usamos el mismo layer de bboxes (calculado con contain)
+  const frame = getOrCreateBBoxLayerForImg(cell, img);
+  const layer = frame.layer;
+
+  // Punto central del área visible
+  const marker = document.createElement('div');
+  marker.className = 'center-marker';
+  marker.style.left = '50%';
+  marker.style.top = '50%';
+  marker.style.transform = 'translate(-50%, -50%)';
+  layer.appendChild(marker);
+
+  if (labelText) {
+    const lab = document.createElement('div');
+    lab.className = 'center-label';
+    lab.textContent = labelText;
+    lab.style.left = '50%';
+    lab.style.top = 'calc(50% - 16px)';
+    lab.style.transform = 'translate(-50%, -100%)';
+    layer.appendChild(lab);
+  }
+}
+
+function updateSidebarCoords(x, y, z) {
+  const xEl = document.getElementById('posX');
+  const yEl = document.getElementById('posY');
+  const zEl = document.getElementById('posZ');
+  if (xEl) xEl.textContent = (typeof x === 'number') ? x.toFixed(1) : String(x);
+  if (yEl) yEl.textContent = (typeof y === 'number') ? y.toFixed(1) : String(y);
+  if (zEl) zEl.textContent = (typeof z === 'number') ? z.toFixed(1) : String(z);
 }
 
 // ======= Overlay helpers (scan activo) =======
@@ -314,7 +348,6 @@ async function fetchState() {
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const data = await res.json();
 
-    // Compat: construimos items si no vienen
     const items = (data.items && data.items.length)
       ? data.items
       : (data.images || []).map(u => ({ url: u, boxes: [] }));
@@ -328,8 +361,19 @@ async function fetchState() {
         img.src = items[i].url + '?t=' + Date.now();
         img.alt = 'Captura ' + (i + 1);
         cell.appendChild(img);
+
         // BBoxes alineados con contain
         drawBoxesForCellWhenReady(cell, img, items[i].boxes || []);
+
+        // === Marcador de centro + etiqueta con X/Y/Z simulados ===
+        const sim = simXZForSlot(i);
+        const label = `X ${sim.X.toFixed(1)} mm | Y ${SIM_POS.Y_MM.toFixed(0)} mm | Z ${sim.Z.toFixed(1)} mm`;
+        const drawCenter = () => addCenterMarkerForCell(cell, img, label);
+        if (img.complete && img.naturalWidth) {
+          drawCenter();
+        } else {
+          img.addEventListener('load', drawCenter, { once: true });
+        }
       } else {
         const span = document.createElement('div');
         span.className = 'slot';
@@ -338,19 +382,22 @@ async function fetchState() {
       }
     }
 
+    // Índice activo (última imagen si está corriendo)
     let activeIndex = (data.running && items.length > 0)
       ? Math.min(items.length - 1, 9)
       : -1;
 
     if (activeIndex !== -1) {
-      if (activeIndex !== lastActiveIndex) {
-        moveScanOverlayToCell(activeIndex);
-        lastActiveIndex = activeIndex;
-      } else {
-        moveScanOverlayToCell(activeIndex);
-      }
+      moveScanOverlayToCell(activeIndex);
+
+      // Actualiza panel lateral con la última posición activa
+      const sim = simXZForSlot(activeIndex);
+      updateSidebarCoords(sim.X, SIM_POS.Y_MM, sim.Z);
+
+      lastActiveIndex = activeIndex;
     } else {
       hideScanOverlay();
+      lastActiveIndex = -1;
     }
 
     if (data.stopped) { stopPolling(); }
@@ -402,7 +449,6 @@ function populateLayerFilter(total) {
     op.textContent = 'Capa ' + i;
     sel.appendChild(op);
   }
-  // Selecciona por defecto la capa actual si existe en el DOM
   const lcEl = document.getElementById('layerCurrent');
   const current = lcEl ? parseInt(lcEl.textContent || '0', 10) : 0;
   if (current > 0 && current <= total) sel.value = String(current);
@@ -467,7 +513,7 @@ async function resetCapture() {
     if (data.status === 'reset_done') {
       stopPolling();
       clearGrid();
-      await loadLibraryForSelectedLayer();   // refresca biblioteca tras limpiar
+      await loadLibraryForSelectedLayer();
       if (startBtn) { startBtn.disabled = false; startBtn.textContent = '▶️ Arrancar'; }
       if (resetBtn) { resetBtn.textContent = '🧹 Reset'; }
     } else {
@@ -492,7 +538,6 @@ async function resetLayers() {
       if (lc) lc.textContent = j.current ?? 0;
       if (lt) lt.textContent = j.total ?? 0;
 
-      // Reposiciona selector y refresca biblioteca
       populateLayerFilter(j.total ?? 0);
       await loadLibraryForSelectedLayer();
     }
@@ -525,7 +570,6 @@ async function deleteSelectedLayer() {
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const j = await res.json();
     if (j.status === 'ok') {
-      // refrescar biblioteca y (opcional) resumen de capas si lo usas
       await loadLibraryForSelectedLayer();
       alert(`Capa ${layer} borrada. Registros eliminados: ${j.deleted_db}${alsoFiles ? ` | archivos: ${j.deleted_files}` : ''}.`);
     } else {
