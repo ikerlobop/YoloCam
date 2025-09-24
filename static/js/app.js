@@ -60,30 +60,192 @@ function emptyGrid() {
 emptyGrid();
 
 // ======= Lightbox =======
-function openLightbox(src) {
+
+// guardamos boxes actuales para recolocarlos en resize
+let _lbBoxes = [];
+function openLightbox(itemOrUrl) {
+  // aceptar tanto {url, boxes} como string url
+  const { url, boxes } = (typeof itemOrUrl === 'string')
+    ? { url: itemOrUrl, boxes: [] }
+    : { url: itemOrUrl.url, boxes: itemOrUrl.boxes || [] };
+
   const lb = document.getElementById('lightbox');
   const img = document.getElementById('lightboxImg');
-  if (img) img.src = src;
+  const overlay = document.getElementById('lightboxOverlay');
+
+  _lbBoxes = boxes || [];
+  if (img) img.src = url + '?t=' + Date.now();
+  if (overlay) overlay.innerHTML = '';
+
+  const draw = () => layoutLightboxOverlayAndDraw();
+  if (img && (img.complete && img.naturalWidth)) {
+    draw();
+  } else if (img) {
+    img.addEventListener('load', draw, { once: true });
+  }
+
   lb.classList.remove('hidden');
 }
+
 function closeLightbox(ev) {
-  if (ev && ev.target && ev.target.id === 'lightboxImg') return;
+  // no cerrar si el click fue sobre la imagen u overlay
+  const id = ev && ev.target && ev.target.id;
+  if (id === 'lightboxImg' || id === 'lightboxOverlay') return;
   document.getElementById('lightbox').classList.add('hidden');
+  const overlay = document.getElementById('lightboxOverlay');
+  if (overlay) overlay.innerHTML = '';
+  _lbBoxes = [];
 }
-window.closeLightbox = closeLightbox; // para el onclick del botón X
+
+// ======= Helpers de overlay de BBoxes (grid/thumb) =======
+
+/**
+ * Crea (si no existe) y devuelve un contenedor overlay relativo al área real que ocupa la imagen
+ * dentro del cell/thumbnail cuando object-fit=contain.
+ * Devuelve {layer, left, top, width, height} en px relativo al cell.
+ */
+function getOrCreateBBoxLayerForImg(cell, img) {
+  // Medidas del contenedor (cell) y naturales de la imagen
+  const cellRect = cell.getBoundingClientRect();
+  const cw = cellRect.width;
+  const ch = cellRect.height;
+
+  const iw = img.naturalWidth || 1;
+  const ih = img.naturalHeight || 1;
+
+  // Escala tipo contain
+  const scale = Math.min(cw / iw, ch / ih);
+  const dispW = iw * scale;
+  const dispH = ih * scale;
+
+  const offsetX = (cw - dispW) / 2;
+  const offsetY = (ch - dispH) / 2;
+
+  // layer
+  let layer = cell.querySelector('.bbox-layer');
+  if (!layer) {
+    layer = document.createElement('div');
+    layer.className = 'bbox-layer';
+    cell.appendChild(layer);
+  }
+  layer.style.left = offsetX + 'px';
+  layer.style.top = offsetY + 'px';
+  layer.style.width = dispW + 'px';
+  layer.style.height = dispH + 'px';
+
+  // limpia cajas previas
+  layer.innerHTML = '';
+
+  return { layer, left: offsetX, top: offsetY, width: dispW, height: dispH };
+}
+
+/**
+ * Dibuja cajas normalizadas YOLO sobre el layer.
+ * boxes: [{cls, xc, yc, w, h}]
+ */
+function drawBoxesOnLayer(layer, boxes) {
+  if (!boxes || !boxes.length) return;
+  for (const b of boxes) {
+    const xc = b.xc ?? 0.5;
+    const yc = b.yc ?? 0.5;
+    const w  = b.w  ?? 0.0;
+    const h  = b.h  ?? 0.0;
+
+    const left = (xc - w/2) * 100;
+    const top  = (yc - h/2) * 100;
+    const box = document.createElement('div');
+    box.className = 'bbox';
+    box.style.left = left + '%';
+    box.style.top = top + '%';
+    box.style.width = (w * 100) + '%';
+    box.style.height = (h * 100) + '%';
+
+    // etiqueta
+    const label = document.createElement('div');
+    label.className = 'bbox-label';
+    label.textContent = (typeof b.cls === 'number' ? `C${b.cls}` : '');
+    box.appendChild(label);
+
+    layer.appendChild(box);
+  }
+}
+
+// Para casos en que la imagen aún no está cargada
+function drawBoxesForCellWhenReady(cell, img, boxes) {
+  const draw = () => {
+    const frame = getOrCreateBBoxLayerForImg(cell, img);
+    drawBoxesOnLayer(frame.layer, boxes);
+  };
+  if (img.complete && img.naturalWidth) {
+    draw();
+  } else {
+    img.addEventListener('load', draw, { once: true });
+  }
+}
+
+// ======= Helpers de overlay para Lightbox =======
+function _computeContainRect(containerEl, imgEl) {
+  const cw = containerEl.clientWidth;
+  const ch = containerEl.clientHeight;
+  const iw = imgEl.naturalWidth || 1;
+  const ih = imgEl.naturalHeight || 1;
+  const scale = Math.min(cw / iw, ch / ih);
+  const dispW = iw * scale;
+  const dispH = ih * scale;
+  const offsetX = (cw - dispW) / 2;
+  const offsetY = (ch - dispH) / 2;
+  return { left: offsetX, top: offsetY, width: dispW, height: dispH };
+}
+
+function layoutLightboxOverlayAndDraw() {
+  const inner = document.getElementById('lightboxInner');
+  const img = document.getElementById('lightboxImg');
+  const overlay = document.getElementById('lightboxOverlay');
+  if (!inner || !img || !overlay) return;
+  if (!img.naturalWidth) return;
+
+  const rect = _computeContainRect(inner, img);
+  overlay.style.left = rect.left + 'px';
+  overlay.style.top = rect.top + 'px';
+  overlay.style.width = rect.width + 'px';
+  overlay.style.height = rect.height + 'px';
+
+  overlay.innerHTML = '';
+  drawBoxesOnLayer(overlay, _lbBoxes);
+}
+
+// recomponer overlay al redimensionar ventana
+window.addEventListener('resize', () => {
+  const lb = document.getElementById('lightbox');
+  if (lb && !lb.classList.contains('hidden')) {
+    layoutLightboxOverlayAndDraw();
+  }
+});
 
 // ======= Biblioteca (thumbnails) =======
-function renderLibrary(urls) {
+function renderLibrary(dataOrUrls) {
   const thumbs = document.getElementById('thumbs');
   thumbs.innerHTML = '';
-  urls.forEach(u => {
+
+  // Admitimos [{url, boxes}] o [url]
+  const items = (dataOrUrls && dataOrUrls.length && typeof dataOrUrls[0] === 'object')
+    ? dataOrUrls
+    : (dataOrUrls || []).map(u => ({ url: u, boxes: [] }));
+
+  for (const it of items) {
+    const wrap = document.createElement('div');
+    wrap.className = 'thumb-wrap';
     const img = document.createElement('img');
     img.className = 'thumb';
-    img.src = u + '?t=' + Date.now();
+    img.src = it.url + '?t=' + Date.now();
     img.alt = 'Captura';
-    img.addEventListener('click', () => openLightbox(u));
-    thumbs.appendChild(img);
-  });
+    img.addEventListener('click', () => openLightbox(it));  // <-- pasa también boxes
+    wrap.appendChild(img);
+    thumbs.appendChild(wrap);
+
+    // Overlay de bboxes en thumb
+    drawBoxesForCellWhenReady(wrap, img, it.boxes || []);
+  }
 }
 
 async function fetchLibraryByLayer(layer) {
@@ -92,7 +254,7 @@ async function fetchLibraryByLayer(layer) {
   params.set('limit', '200');
   const res = await fetch('/library?' + params.toString());
   if (!res.ok) throw new Error('HTTP ' + res.status);
-  return res.json(); // {images: [...], layer}
+  return res.json(); // {images: [...], items:[{url,boxes}], layer}
 }
 
 async function loadLibraryForSelectedLayer() {
@@ -100,16 +262,21 @@ async function loadLibraryForSelectedLayer() {
   const chosen = sel ? parseInt(sel.value || '0', 10) : 0;
   try {
     const data = await fetchLibraryByLayer(chosen);
-    renderLibrary(data.images || []);
+    // Preferimos items (con cajas). Si no, caemos a images.
+    if (data.items && data.items.length) {
+      renderLibrary(data.items);
+    } else {
+      renderLibrary(data.images || []);
+    }
     const info = document.getElementById('layerCountInfo');
-    if (info) info.textContent = `Mostrando ${data.images?.length ?? 0} imágenes ${chosen > 0 ? ('de capa ' + chosen) : 'de todas las capas'}.`;
+    if (info) info.textContent = `Mostrando ${data.items?.length ?? data.images?.length ?? 0} imágenes ${chosen > 0 ? ('de capa ' + chosen) : 'de todas las capas'}.`;
   } catch (e) {
     console.warn('library error', e);
     renderLibrary([]);
   }
 }
 
-// ======= Overlay helpers =======
+// ======= Overlay helpers (scan activo) =======
 function getCellAt(index) {
   const cells = grid.querySelectorAll('.cell');
   return cells[index] || null;
@@ -147,15 +314,22 @@ async function fetchState() {
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const data = await res.json();
 
+    // Compat: construimos items si no vienen
+    const items = (data.items && data.items.length)
+      ? data.items
+      : (data.images || []).map(u => ({ url: u, boxes: [] }));
+
     const cells = Array.from(grid.querySelectorAll('.cell'));
     for (let i = 0; i < 10; i++) {
       const cell = cells[i];
       cell.innerHTML = '';
-      if (i < data.images.length) {
+      if (i < items.length) {
         const img = document.createElement('img');
-        img.src = data.images[i] + '?t=' + Date.now();
+        img.src = items[i].url + '?t=' + Date.now();
         img.alt = 'Captura ' + (i + 1);
         cell.appendChild(img);
+        // BBoxes alineados con contain
+        drawBoxesForCellWhenReady(cell, img, items[i].boxes || []);
       } else {
         const span = document.createElement('div');
         span.className = 'slot';
@@ -164,11 +338,8 @@ async function fetchState() {
       }
     }
 
-    // ⚠️ La biblioteca ya NO se alimenta de /state, sino de /library por capa
-    // renderLibrary(data.images);
-
-    let activeIndex = (data.running && data.images.length > 0)
-      ? Math.min(data.images.length - 1, 9)
+    let activeIndex = (data.running && items.length > 0)
+      ? Math.min(items.length - 1, 9)
       : -1;
 
     if (activeIndex !== -1) {
@@ -180,7 +351,6 @@ async function fetchState() {
       }
     } else {
       hideScanOverlay();
-      lastActiveIndex = -1;
     }
 
     if (data.stopped) { stopPolling(); }
@@ -357,8 +527,6 @@ async function deleteSelectedLayer() {
     if (j.status === 'ok') {
       // refrescar biblioteca y (opcional) resumen de capas si lo usas
       await loadLibraryForSelectedLayer();
-      // Si quieres, puedes resetear selector a "Todas" tras borrar:
-      // sel.value = '0';
       alert(`Capa ${layer} borrada. Registros eliminados: ${j.deleted_db}${alsoFiles ? ` | archivos: ${j.deleted_files}` : ''}.`);
     } else {
       alert('No se pudo borrar la capa.');
@@ -390,5 +558,5 @@ document.addEventListener('DOMContentLoaded', () => {
   if (refreshLibraryBtn) refreshLibraryBtn.addEventListener('click', loadLibraryForSelectedLayer);
 
   const deleteLayerBtn = document.getElementById('deleteLayerBtn');
-if (deleteLayerBtn) deleteLayerBtn.addEventListener('click', deleteSelectedLayer);
+  if (deleteLayerBtn) deleteLayerBtn.addEventListener('click', deleteSelectedLayer);
 });

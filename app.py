@@ -10,8 +10,10 @@ import threading
 import random
 import sqlite3
 import shutil
+import json
 from uuid import uuid4
-from typing import List
+from typing import List, Tuple, Optional
+#from ultralytics import YOLO
 
 import psutil
 from flask import (
@@ -31,6 +33,10 @@ app.secret_key = os.environ.get("FLASK_SECRET", SECRET_DEFAULT)
 CAM_INDEX = 0
 WIDTH, HEIGHT = 640, 480
 FPS = 30
+
+'''model = YOLO("yolo11n.pt")
+results = model("imagen.jpg")
+results.show()'''
 
 # Dataset Roboflow exportado bajo static/dataset
 DATASET_DIR = os.path.join("static", "dataset")
@@ -70,6 +76,14 @@ def get_db():
     conn.row_factory = sqlite3.Row
     return conn
 
+def _safe_add_column(conn: sqlite3.Connection, table: str, colspec: str):
+    # SQLite antiguo no soporta IF NOT EXISTS en ADD COLUMN, usamos try/except
+    try:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {colspec}")
+        conn.commit()
+    except Exception:
+        pass  # ya existe
+
 def init_db():
     conn = get_db()
     conn.execute("""
@@ -91,6 +105,9 @@ def init_db():
         ts INTEGER NOT NULL        -- epoch seconds
     );
     """)
+    # Migración: columnas nuevas para enlazar labels
+    _safe_add_column(conn, "captures", "src_path TEXT")      # p.ej: dataset/valid/images/foo.jpg
+    _safe_add_column(conn, "captures", "labels_json TEXT")   # JSON con cajas normalizadas
     conn.execute("CREATE INDEX IF NOT EXISTS idx_captures_layer_ts ON captures(layer, ts DESC);")
     conn.commit()
     conn.close()
@@ -238,11 +255,58 @@ def build_pool(mode: str) -> List[str]:
     random.shuffle(pool)
     return pool
 
+# ---------- Labels (YOLO) ----------
+def _labels_path_for_src(path_rel_src: str) -> Optional[str]:
+    """
+    Recibe 'dataset/<split>/images/file.jpg' y devuelve ruta absoluta al TXT en '.../labels/file.txt'
+    """
+    if not path_rel_src:
+        return None
+    parts = path_rel_src.replace("\\", "/").split("/")
+    if len(parts) < 4:
+        return None
+    # dataset/<split>/images/<fname>
+    split = parts[1]
+    fname = parts[-1]
+    stem, _ = os.path.splitext(fname)
+    abs_txt = os.path.join(app.static_folder, "dataset", split, "labels", stem + ".txt")
+    return abs_txt
+
+def _parse_yolo_txt(abs_txt: str) -> List[dict]:
+    """
+    Devuelve lista de dicts: {cls:int, xc:float, yc:float, w:float, h:float}
+    Coordenadas normalizadas [0..1] en formato YOLO.
+    """
+    out = []
+    if not abs_txt or not os.path.isfile(abs_txt):
+        return out
+    try:
+        with open(abs_txt, "r", encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                parts = line.split()
+                if len(parts) < 5:
+                    continue
+                cls = int(float(parts[0]))
+                xc = float(parts[1]); yc = float(parts[2])
+                w  = float(parts[3]); h  = float(parts[4])
+                # clamp básico
+                xc = max(0.0, min(1.0, xc))
+                yc = max(0.0, min(1.0, yc))
+                w  = max(0.0, min(1.0, w))
+                h  = max(0.0, min(1.0, h))
+                out.append({"cls": cls, "xc": xc, "yc": yc, "w": w, "h": h})
+    except Exception as e:
+        print(f"[WARN] No se pudo parsear labels {abs_txt}: {e}")
+    return out
+
 # ----------------- PERSISTENCIA DE CAPTURAS (COPIA A layers/) -----------------
 def save_capture(path_rel_src: str, layer: int, split: str):
     """
     Crea una COPIA de la imagen del dataset en static/layers/layer_<layer>/uuid.ext
-    y guarda en DB la ruta de la COPIA (relativa a /static).
+    y guarda en DB la ruta de la COPIA (relativa a /static) + labels normalizados.
     El dataset original (static/dataset/...) no se toca nunca.
     """
     src_abs = os.path.join(app.static_folder, path_rel_src)
@@ -260,10 +324,16 @@ def save_capture(path_rel_src: str, layer: int, split: str):
 
     shutil.copy2(src_abs, dst_abs)
 
+    # Parsear labels del origen
+    labels_abs = _labels_path_for_src(path_rel_src)
+    boxes = _parse_yolo_txt(labels_abs)
+    labels_json = json.dumps(boxes) if boxes else None
+
     conn = get_db()
     conn.execute(
-        "INSERT INTO captures (path, layer, split, ts) VALUES (?,?,?, strftime('%s','now'))",
-        (dst_rel, int(layer), (split or '').lower())
+        "INSERT INTO captures (path, layer, split, ts, src_path, labels_json) "
+        "VALUES (?,?,?, strftime('%s','now'), ?, ?)",
+        (dst_rel, int(layer), (split or '').lower(), path_rel_src, labels_json)
     )
     conn.commit()
     conn.close()
@@ -272,7 +342,7 @@ def save_capture(path_rel_src: str, layer: int, split: str):
 def capture_loop():
     """
     Simulación: selecciona imágenes desde el dataset y las coloca en el grid.
-    Además, cada selección se copia a layers/layer_<n>/... y se registra en DB.
+    Además, cada selección se copia a layers/layer_<n>/... y se registra en DB (con labels).
     """
     try:
         pool_remaining = build_pool(SPLIT_MODE)
@@ -344,9 +414,23 @@ def get_state():
         running = state["running"]
         stopped = state["stopped"]
         error = state["error"]
+
+    # urls para compatibilidad
     urls = [url_for('static', filename=rel_path) for rel_path in names]
+
+    # items con boxes (se calculan al vuelo desde dataset)
+    items = []
+    for rel_path in names:
+        abs_txt = _labels_path_for_src(rel_path)
+        boxes = _parse_yolo_txt(abs_txt)
+        items.append({
+            "url": url_for('static', filename=rel_path),
+            "boxes": boxes
+        })
+
     return jsonify({
-        "images": urls,
+        "images": urls,            # retro-compat
+        "items": items,            # nuevo: [{url, boxes}]
         "running": running,
         "stopped": stopped,
         "error": error,
@@ -396,7 +480,7 @@ def reset_layers():
         state["layer_current"] = 0
     return jsonify({"status": "layers_reset", "current": 0, "total": state["layer_total"]})
 
-# --- Biblioteca: SOLO devuelve copias bajo static/layers/ ---
+# --- Biblioteca: SOLO devuelve copias bajo static/layers/ + labels si existen ---
 @app.route("/library")
 @login_required
 def library():
@@ -405,23 +489,43 @@ def library():
     Query params:
       - layer: int (opcional; 0 o None => todas las capas)
       - limit: int (opcional, por defecto 200)
+    Respuesta:
+      {
+        images: [url,...]              # retro-compat
+        items:  [{url, boxes}, ...]    # recomendado (boxes normalizados [0..1])
+        layer:  int
+      }
     """
     layer = request.args.get("layer", type=int)
     limit = request.args.get("limit", 200, type=int)
     conn = get_db()
     if layer is None or layer == 0:
         rows = conn.execute(
-            "SELECT path FROM captures WHERE path LIKE ? ORDER BY ts DESC LIMIT ?",
+            "SELECT path, labels_json FROM captures WHERE path LIKE ? ORDER BY ts DESC LIMIT ?",
             (f"{LAYERS_ROOT_REL}/%", limit)
         ).fetchall()
     else:
         rows = conn.execute(
-            "SELECT path FROM captures WHERE layer=? AND path LIKE ? ORDER BY ts DESC LIMIT ?",
+            "SELECT path, labels_json FROM captures WHERE layer=? AND path LIKE ? ORDER BY ts DESC LIMIT ?",
             (layer, f"{LAYERS_ROOT_REL}/%", limit)
         ).fetchall()
     conn.close()
-    urls = [url_for('static', filename=row[0]) for row in rows]
-    return jsonify({"images": urls, "layer": layer or 0})
+
+    items = []
+    urls = []
+    for r in rows:
+        rel = r[0]
+        url = url_for('static', filename=rel)
+        urls.append(url)
+        boxes = []
+        if r[1]:
+            try:
+                boxes = json.loads(r[1])
+            except Exception:
+                boxes = []
+        items.append({"url": url, "boxes": boxes})
+
+    return jsonify({"images": urls, "items": items, "layer": layer or 0})
 
 @app.route("/layers_summary")
 @login_required
