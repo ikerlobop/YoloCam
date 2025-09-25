@@ -102,17 +102,25 @@
     <div class="photo-library">
       <div class="library-header">BIBLIOTECA DE CAPTURAS</div>
       <div class="photos-container">
-        <div class="library-controls" style="display:flex;gap:12px;align-items:center;margin-bottom:8px;">
-          <label for="layerFilter" style="font-size:14px;opacity:.8">Filtrar por capa:</label>
-          <select id="layerFilter" class="btn-small" style="min-width:110px;"></select>
-          <button id="refreshLibraryBtn" class="btn-small">Actualizar</button>
-          <button id="deleteLayerBtn" class="btn-small warn">Borrar capa</button>
-          <label style="display:flex;align-items:center;gap:6px;font-size:12px;opacity:.8">
-            <input type="checkbox" id="deleteFilesChk">borrar archivos
-          </label>
-          <div id="layerCountInfo" style="font-size:12px;opacity:.7"></div>
+        <div class="library-controls" style="display:flex;flex-direction:column;gap:12px;margin-bottom:8px;">
+          <div style="display:flex;gap:12px;align-items:center;">
+            <label for="layerFilter" style="font-size:14px;opacity:.8">Filtrar por capa:</label>
+            <select id="layerFilter" class="btn-small" style="min-width:110px;"></select>
+            <button id="refreshLibraryBtn" class="btn-small">Actualizar</button>
+          </div>
+          <div style="display:flex;gap: 12px;align-items:center;">
+            <div id="layerCountInfo" style="font-size:12px;opacity:.7;margin-left:auto;"></div>
+          </div>
+          <div style="display:flex;gap:12px;align-items:center;">
+            <button id="deleteLayerBtn" class="btn-small warn">Borrar capa</button>
+            <label style="display:flex;align-items:center;gap:6px;font-size:12px;opacity:.8">
+              <input type="checkbox" id="deleteFilesChk">borrar archivos
+            </label>
+          </div>
         </div>
-        <div id="thumbs" class="thumb-grid"></div>
+        <div id="thumbs" class="thumb-grid" style="display:grid;gap:60px;grid-template-columns:repeat(auto-fill, minmax(120px, 1fr));">
+
+          <!-- Thumbnails cargados dinámicamente aquí -->
       </div>
     </div>
 

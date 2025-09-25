@@ -415,22 +415,20 @@ def get_state():
         stopped = state["stopped"]
         error = state["error"]
 
-    # urls para compatibilidad
-    urls = [url_for('static', filename=rel_path) for rel_path in names]
-
-    # items con boxes (se calculan al vuelo desde dataset)
     items = []
     for rel_path in names:
         abs_txt = _labels_path_for_src(rel_path)
         boxes = _parse_yolo_txt(abs_txt)
         items.append({
             "url": url_for('static', filename=rel_path),
-            "boxes": boxes
+            "boxes": boxes,
+            "boxes_count": len(boxes),        # ← diagnóstico
+            "src_label": abs_txt if abs_txt else None  # ← para verificar ruta
         })
 
     return jsonify({
-        "images": urls,            # retro-compat
-        "items": items,            # nuevo: [{url, boxes}]
+        "images": [url_for('static', filename=p) for p in names],  # retro-compat
+        "items": items,
         "running": running,
         "stopped": stopped,
         "error": error,

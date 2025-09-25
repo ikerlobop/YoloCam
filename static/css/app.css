@@ -623,7 +623,6 @@ body{
     border-radius: 12px;
 }
 
-/* === BBoxes sobre grid, thumbs y lightbox === */
 .bbox-layer{
   position:absolute;
   left:0; top:0;
@@ -652,12 +651,10 @@ body{
   box-shadow:0 2px 6px rgba(0,0,0,.4);
 }
 
-/* contenedor de thumbnail para poder posicionar el overlay */
 .thumb-wrap{
   position:relative;
 }
 
-/* === Marcador de centro y etiqueta en el feed === */
 .center-marker{
   position:absolute;
   width:14px; height:14px;
