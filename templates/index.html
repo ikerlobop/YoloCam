@@ -63,6 +63,8 @@
           <button id="startBtn" class="btn-small success">Arrancar</button>
           <button id="resetBtn" class="btn-small warn">Siguiente Capa</button>
           <button id="resetLayersBtn" class="btn-small warn">Reset Capas</button>
+          <a class="btn-small" href="/training">Entrenamiento</a>
+
         </div>
       </div>
 
@@ -98,7 +100,42 @@
         </div>
       </div>
     </div>
-    
+
+        <!-- ===== PANE ENTRENAMIENTO (oculto por defecto) ===== -->
+    <div id="trainingPane" class="training-pane hidden">
+      <div class="train-toolbar">
+        <div class="row">
+          <label>Split:</label>
+          <select id="splitSelect">
+            <option value="train">train</option>
+            <option value="valid">valid</option>
+            <option value="test">test</option>
+          </select>
+
+          <label>Imagen:</label>
+          <select id="imageSelect" style="min-width:240px;"></select>
+          <button id="loadImageBtn" class="btn-small">Cargar</button>
+          <div class="spacer"></div>
+          <label>Clase (texto de classes.txt):</label>
+          <input id="classInput" placeholder="grieta / porosidad / ..." />
+        </div>
+
+        <div class="row">
+          <button id="zoomInBtn" class="btn-small">+</button>
+          <button id="zoomOutBtn" class="btn-small">-</button>
+          <button id="resetViewBtn" class="btn-small">Reset vista</button>
+          <button id="undoBoxBtn" class="btn-small">Deshacer</button>
+          <button id="clearBoxesBtn" class="btn-small warn">Reset cajas</button>
+          <button id="saveAnnBtn" class="btn-small success">Guardar anotación</button>
+          <div id="hud" class="hud"></div>
+        </div>
+      </div>
+
+      <div class="train-canvas-wrap">
+        <canvas id="trainCanvas" width="960" height="640"></canvas>
+      </div>
+    </div>
+    <!-- ===== PANE BIBLIOTECA DE CAPTURAS ===== -->
     <div class="photo-library">
       <div class="library-header">BIBLIOTECA DE CAPTURAS</div>
       <div class="photos-container">

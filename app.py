@@ -595,6 +595,120 @@ def library_delete_layer():
         "deleted_db": deleted,
         "deleted_files": files_removed if delete_files else None
     })
+    
+@app.route("/training")
+@login_required
+def training():
+    return render_template("training.html")
+
+
+# ====== ENTRENAMIENTO / ANOTACIÓN ======
+CLASSES_FILE = os.path.join(os.getcwd(), "classes.txt")
+
+def _dataset_images(split: str):
+    split = (split or "train").lower()
+    img_dir = os.path.join(app.static_folder, "dataset", split, "images")
+    if not os.path.isdir(img_dir):
+        return []
+    return sorted([f for f in os.listdir(img_dir) if f.lower().endswith((".jpg",".jpeg",".png"))])
+
+@app.route("/annotate/images")
+@login_required
+def annotate_images():
+    split = request.args.get("split", "train").lower()
+    items = _dataset_images(split)
+    return jsonify({"split": split, "images": items})
+
+def _classes_list():
+    if not os.path.isfile(CLASSES_FILE):
+        return []
+    with open(CLASSES_FILE, "r", encoding="utf-8") as fh:
+        return [l.strip() for l in fh if l.strip()]
+    
+@app.route("/annotate/classes")
+@login_required
+def annotate_classes():
+    path = os.path.join(os.getcwd(), "classes.txt")
+    if not os.path.isfile(path):
+        return jsonify({"classes": []})
+    with open(path, "r", encoding="utf-8") as fh:
+        classes = [l.strip() for l in fh if l.strip()]
+    return jsonify({"classes": classes})
+
+
+@app.route("/annotate/save", methods=["POST"])
+@login_required
+def annotate_save():
+    """
+    Body JSON:
+      {
+        "split": "train|valid|test",
+        "image": "nombre.jpg",
+        "label": "grieta",             # texto presente en classes.txt
+        "boxes": [{"x":..,"y":..,"w":..,"h":..}, ...]  # coords en PIXELES de la imagen original
+      }
+    Guarda/overwrite el TXT en static/dataset/<split>/labels/<stem>.txt
+    """
+    data = request.get_json(silent=True) or {}
+    split = (data.get("split") or "train").lower()
+    image = data.get("image")
+    label = (data.get("label") or "").strip()
+    boxes = data.get("boxes") or []
+
+    if not image or not label or not isinstance(boxes, list):
+        return jsonify({"error": "payload incompleto"}), 400
+
+    # localizar imagen
+    img_abs = os.path.join(app.static_folder, "dataset", split, "images", image)
+    if not os.path.isfile(img_abs):
+        return jsonify({"error": f"imagen no encontrada en {split}/images/{image}"}), 404
+
+    # dims
+    try:
+        from PIL import Image
+        with Image.open(img_abs) as im:
+            iw, ih = im.size
+    except Exception as e:
+        return jsonify({"error": f"PIL no pudo abrir imagen: {e}"}), 500
+
+    # classes
+    classes = _classes_list()
+    if not classes:
+        return jsonify({"error": "classes.txt no encontrado o vacío"}), 400
+    try:
+        class_id = classes.index(label)
+    except ValueError:
+        return jsonify({"error": f"label '{label}' no está en classes.txt"}), 400
+
+    # asegurar carpeta labels
+    labels_dir = os.path.join(app.static_folder, "dataset", split, "labels")
+    os.makedirs(labels_dir, exist_ok=True)
+
+    stem, _ = os.path.splitext(image)
+    txt_abs = os.path.join(labels_dir, stem + ".txt")
+
+    # normalizar y guardar (overwrite)
+    lines = []
+    def clamp(v, lo=0.0, hi=1.0): return max(lo, min(hi, v))
+
+    for b in boxes:
+        x = float(b.get("x", 0)); y = float(b.get("y", 0))
+        w = float(b.get("w", 0)); h = float(b.get("h", 0))
+        # recorte dentro de imagen
+        x = max(0, min(x, iw)); y = max(0, min(y, ih))
+        w = max(1, min(w, iw - x)); h = max(1, min(h, ih - y))
+
+        xc = (x + w/2) / iw
+        yc = (y + h/2) / ih
+        nw = w / iw
+        nh = h / ih
+        lines.append(f"{class_id} {clamp(xc):.6f} {clamp(yc):.6f} {clamp(nw):.6f} {clamp(nh):.6f}")
+
+    with open(txt_abs, "w", encoding="utf-8") as fh:
+        fh.write("\n".join(lines) + ("\n" if lines else ""))
+
+    return jsonify({"status": "ok", "saved": txt_abs.replace(app.static_folder+os.sep, "").replace("\\","/")})
+
 
 # ----------------- MAIN -----------------
 if __name__ == "__main__":

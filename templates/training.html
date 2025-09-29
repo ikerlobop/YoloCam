@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Entrenamiento — ATL RDT</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+  <style>
+    .train-page {
+      min-height: 100vh; display:flex; flex-direction:column; background:#0f0f12; color:#fff;
+    }
+    .train-topbar {
+      display:flex; align-items:center; gap:12px; padding:10px 14px;
+      border-bottom:1px solid #2a2a35; background:#141419;
+    }
+    .train-topbar .spacer{flex:1}
+    .train-body {
+      flex:1; display:flex; flex-direction:column; gap:12px; padding:12px;
+    }
+    .train-toolbar .row {
+      display:flex; align-items:center; gap:10px; flex-wrap:wrap;
+    }
+    .train-canvas-wrap {
+      display:flex; align-items:center; justify-content:center;
+      background:#111; border:1px solid #2a2a35; border-radius:8px; padding:8px;
+    }
+    #trainCanvas { background:#000; border:1px solid #00ff41; cursor:none; }
+    .hud { margin-left:auto; font-size:12px; opacity:.8; }
+    .btn-link { color:#fff; text-decoration:none; }
+  </style>
+</head>
+<body>
+  <div class="train-page">
+    <div class="train-topbar">
+      <a class="btn-small btn-link" href="/">← Volver a principal</a>
+      <div style="font-weight:600;">Modo Entrenamiento</div>
+      <div class="spacer"></div>
+      <div id="userName" style="opacity:.8;"></div>
+    </div>
+
+    <div class="train-body">
+      <div class="train-toolbar">
+        <div class="row">
+          <label>Split:</label>
+          <select id="splitSelect">
+            <option value="train">train</option>
+            <option value="valid">valid</option>
+            <option value="test">test</option>
+          </select>
+
+          <label>Imagen:</label>
+          <select id="imageSelect" style="min-width:260px;"></select>
+          <button id="loadImageBtn" class="btn-small">Cargar</button>
+
+          <div class="spacer"></div>
+
+          <label>Clase:</label>
+          <select id="classSelect" style="min-width:180px;"></select>
+
+          <button id="zoomInBtn" class="btn-small">+</button>
+          <button id="zoomOutBtn" class="btn-small">-</button>
+          <button id="resetViewBtn" class="btn-small">Reset vista</button>
+          <button id="undoBoxBtn" class="btn-small">Deshacer</button>
+          <button id="clearBoxesBtn" class="btn-small warn">Reset cajas</button>
+          <button id="saveAnnBtn" class="btn-small success">Guardar anotación</button>
+
+          <div id="hud" class="hud"></div>
+        </div>
+      </div>
+
+      <div class="train-canvas-wrap">
+        <canvas id="trainCanvas" width="960" height="640"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <script src="{{ url_for('static', filename='js/training.js') }}"></script>
+</body>
+</html>
