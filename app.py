@@ -717,6 +717,33 @@ def upload_training_image():
         "label": saved_label
     })
 
+# ====== DATASET BROWSER ======
+def _list_split_items(split: str):
+    img_dir = os.path.join(app.static_folder, "dataset", split, "images")
+    out = []
+    if os.path.isdir(img_dir):
+        for f in sorted(os.listdir(img_dir)):
+            if f.lower().endswith((".jpg",".jpeg",".png")):
+                url = url_for("static", filename=f"dataset/{split}/images/{f}")
+                out.append({"name": f, "url": url})
+    return out
+
+@app.route("/dataset_browser")
+@login_required
+def dataset_browser():
+    return render_template("dataset.html")
+
+@app.route("/dataset/list")
+@login_required
+def dataset_list():
+    splits = ["train", "valid", "test"]
+    data = {}
+    for sp in splits:
+        items = _list_split_items(sp)
+        data[sp] = {"count": len(items), "items": items}
+    return jsonify(data)
+
+
 # ----------------- MAIN -----------------
 if __name__ == "__main__":
     with lock:
