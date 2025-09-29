@@ -1,10 +1,2 @@
 grieta
-porosidad
-falta_material
-desalineacion
-fibra_levantada
-arruga
-contaminacion
-delaminacion
-hueco
-rebaba
+hendidura

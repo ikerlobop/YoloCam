@@ -1,8 +1,5 @@
 #!/usr/bin/env python3
-# app.py — UI ATL + grid 2x5 + Login (SQLite) + Botón Arrancar + Botón Reset
-# Simulación: usa static/dataset/valid/images como fuente de "capturas".
-# Cada captura se COPY a static/layers/layer_<n>/... para la biblioteca por capas.
-# Nunca se modifica/borra el dataset original.
+# app.py — UI ATL + grid 2x5 + Login (SQLite) + Entrenamiento/Anotación + Upload por split
 
 import os
 import time
@@ -12,8 +9,7 @@ import sqlite3
 import shutil
 import json
 from uuid import uuid4
-from typing import List, Tuple, Optional
-#from ultralytics import YOLO
+from typing import List, Optional
 
 import psutil
 from flask import (
@@ -21,10 +17,11 @@ from flask import (
     session, redirect, request, url_for
 )
 from werkzeug.security import generate_password_hash, check_password_hash
+from werkzeug.utils import secure_filename
 from functools import wraps
 
 # ----------------- APP (debe ir primero) -----------------
-app = Flask(__name__, static_folder="static")
+app = Flask(__name__, static_folder="static", template_folder="templates")
 SECRET_DEFAULT = "dev-secret-change-me"
 app.secret_key = os.environ.get("FLASK_SECRET", SECRET_DEFAULT)
 
@@ -34,20 +31,18 @@ CAM_INDEX = 0
 WIDTH, HEIGHT = 640, 480
 FPS = 30
 
-'''model = YOLO("yolo11n.pt")
-results = model("imagen.jpg")
-results.show()'''
-
-# Dataset Roboflow exportado bajo static/dataset
+# Dataset bajo static/dataset
 DATASET_DIR = os.path.join("static", "dataset")
-# Para simulación tomamos SIEMPRE de valid/images
+DATASET_ROOT = os.path.join(app.static_folder, "dataset")  # abs
+
+# Split fuente para el grid (simulación)
 SPLIT_MODE = os.environ.get("SPLIT_MODE", "valid_only").lower()
 
 # En simulación NO exigimos labels
-REQUIRE_LABEL = False  # <- si quieres forzar labels, pon True y usa fallback más abajo
+REQUIRE_LABEL = False
 
 TOTAL_SLOTS = 10      # 2×5
-CYCLE_SECONDS = 2     # ritmo de selección (segundos entre slots)
+CYCLE_SECONDS = 2     # segundos entre slots
 
 DB_PATH = "users.db"
 
@@ -77,7 +72,6 @@ def get_db():
     return conn
 
 def _safe_add_column(conn: sqlite3.Connection, table: str, colspec: str):
-    # SQLite antiguo no soporta IF NOT EXISTS en ADD COLUMN, usamos try/except
     try:
         conn.execute(f"ALTER TABLE {table} ADD COLUMN {colspec}")
         conn.commit()
@@ -105,7 +99,6 @@ def init_db():
         ts INTEGER NOT NULL        -- epoch seconds
     );
     """)
-    # Migración: columnas nuevas para enlazar labels
     _safe_add_column(conn, "captures", "src_path TEXT")      # p.ej: dataset/valid/images/foo.jpg
     _safe_add_column(conn, "captures", "labels_json TEXT")   # JSON con cajas normalizadas
     conn.execute("CREATE INDEX IF NOT EXISTS idx_captures_layer_ts ON captures(layer, ts DESC);")
@@ -157,7 +150,7 @@ def login():
 
 @app.route("/logout")
 def logout():
-    session.clear()
+    session.clear
     return redirect(url_for("login"))
 
 # ----------------- SISTEMA -----------------
@@ -231,7 +224,6 @@ def _list_images(split: str) -> List[str]:
             if _has_label(split, f):
                 with_label.append(rel)
 
-    # Fallback: si pedimos labels y no hay ninguna, usa todas (modo demo)
     if REQUIRE_LABEL and not with_label and all_imgs:
         print(f"[WARN] No hay imágenes con label en '{split}'. Usando TODAS para simulación.")
         return all_imgs
@@ -239,9 +231,6 @@ def _list_images(split: str) -> List[str]:
     return with_label if REQUIRE_LABEL else all_imgs
 
 def build_pool(mode: str) -> List[str]:
-    """
-    Construye el pool. En nuestra simulación el modo por defecto es 'valid_only'.
-    """
     mode = (mode or "").lower()
     if mode == "train_only":
         pool = _list_images("train")
@@ -252,7 +241,8 @@ def build_pool(mode: str) -> List[str]:
     else:
         pool = _list_images("valid")  # simulación principal
     print(f"[INFO] SPLIT_MODE={mode} -> {len(pool)} imágenes en pool")
-    random.shuffle(pool)
+    random.shuffle(pool
+    )
     return pool
 
 # ---------- Labels (YOLO) ----------
@@ -265,7 +255,6 @@ def _labels_path_for_src(path_rel_src: str) -> Optional[str]:
     parts = path_rel_src.replace("\\", "/").split("/")
     if len(parts) < 4:
         return None
-    # dataset/<split>/images/<fname>
     split = parts[1]
     fname = parts[-1]
     stem, _ = os.path.splitext(fname)
@@ -273,10 +262,6 @@ def _labels_path_for_src(path_rel_src: str) -> Optional[str]:
     return abs_txt
 
 def _parse_yolo_txt(abs_txt: str) -> List[dict]:
-    """
-    Devuelve lista de dicts: {cls:int, xc:float, yc:float, w:float, h:float}
-    Coordenadas normalizadas [0..1] en formato YOLO.
-    """
     out = []
     if not abs_txt or not os.path.isfile(abs_txt):
         return out
@@ -292,7 +277,6 @@ def _parse_yolo_txt(abs_txt: str) -> List[dict]:
                 cls = int(float(parts[0]))
                 xc = float(parts[1]); yc = float(parts[2])
                 w  = float(parts[3]); h  = float(parts[4])
-                # clamp básico
                 xc = max(0.0, min(1.0, xc))
                 yc = max(0.0, min(1.0, yc))
                 w  = max(0.0, min(1.0, w))
@@ -324,7 +308,6 @@ def save_capture(path_rel_src: str, layer: int, split: str):
 
     shutil.copy2(src_abs, dst_abs)
 
-    # Parsear labels del origen
     labels_abs = _labels_path_for_src(path_rel_src)
     boxes = _parse_yolo_txt(labels_abs)
     labels_json = json.dumps(boxes) if boxes else None
@@ -340,20 +323,14 @@ def save_capture(path_rel_src: str, layer: int, split: str):
 
 # ----------------- CAPTURA (SELECCIÓN ALEATORIA) -----------------
 def capture_loop():
-    """
-    Simulación: selecciona imágenes desde el dataset y las coloca en el grid.
-    Además, cada selección se copia a layers/layer_<n>/... y se registra en DB (con labels).
-    """
     try:
         pool_remaining = build_pool(SPLIT_MODE)
         if not pool_remaining:
             raise RuntimeError(
-                f"No hay imágenes válidas en '{SPLIT_MODE}'. "
-                f"Revisa static/dataset/valid/images"
+                f"No hay imágenes válidas en '{SPLIT_MODE}'. Revisa static/dataset/<split>/images"
             )
 
         slot_idx = 0
-
         while slot_idx < TOTAL_SLOTS:
             with lock:
                 if len(state["images"]) >= TOTAL_SLOTS:
@@ -375,7 +352,6 @@ def capture_loop():
                 slot_idx += 1
                 print(f"[DEBUG] Slot {slot_idx} cargado con {chosen}")
 
-            # Guardar COPIA para biblioteca (fuera del lock)
             try:
                 save_capture(chosen, current_layer, SPLIT_MODE)
             except Exception as e:
@@ -401,7 +377,7 @@ def ensure_thread():
     t.start()
     return True
 
-# ----------------- RUTAS -----------------
+# ----------------- RUTAS PRINCIPALES -----------------
 @app.route("/")
 @login_required
 def index():
@@ -422,12 +398,12 @@ def get_state():
         items.append({
             "url": url_for('static', filename=rel_path),
             "boxes": boxes,
-            "boxes_count": len(boxes),        # ← diagnóstico
-            "src_label": abs_txt if abs_txt else None  # ← para verificar ruta
+            "boxes_count": len(boxes),
+            "src_label": abs_txt if abs_txt else None
         })
 
     return jsonify({
-        "images": [url_for('static', filename=p) for p in names],  # retro-compat
+        "images": [url_for('static', filename=p) for p in names],
         "items": items,
         "running": running,
         "stopped": stopped,
@@ -447,12 +423,9 @@ def get_layers():
 @login_required
 def start_capture():
     with lock:
-        # limpiar ciclo para el grid
         state.update({"images": [], "running": False, "stopped": False, "error": None})
-        # subir capa al arrancar (una por ciclo)
         if state["layer_current"] < state["layer_total"]:
             state["layer_current"] += 1
-
         lc = state["layer_current"]
         lt = state["layer_total"]
 
@@ -482,18 +455,6 @@ def reset_layers():
 @app.route("/library")
 @login_required
 def library():
-    """
-    Devuelve imágenes de la biblioteca filtradas por capa (copias en layers/).
-    Query params:
-      - layer: int (opcional; 0 o None => todas las capas)
-      - limit: int (opcional, por defecto 200)
-    Respuesta:
-      {
-        images: [url,...]              # retro-compat
-        items:  [{url, boxes}, ...]    # recomendado (boxes normalizados [0..1])
-        layer:  int
-      }
-    """
     layer = request.args.get("layer", type=int)
     limit = request.args.get("limit", 200, type=int)
     conn = get_db()
@@ -538,15 +499,9 @@ def layers_summary():
     conn.close()
     return jsonify({"layers": [{"layer": r[0], "count": r[1]} for r in rows]})
 
-# --- Borrado seguro por capa (solo copias bajo layers/) ---
 @app.route("/library/delete_layer", methods=["POST"])
 @login_required
 def library_delete_layer():
-    """
-    Borra todas las capturas de una capa en DB y, opcionalmente, los archivos físicos.
-    Solo borra archivos si están bajo static/layers/ (nunca static/dataset/).
-    Body JSON: { "layer": int, "delete_files": bool }
-    """
     data = request.get_json(silent=True) or {}
     layer = data.get("layer", None)
     delete_files = bool(data.get("delete_files", False))
@@ -564,10 +519,7 @@ def library_delete_layer():
 
     files_to_delete = []
     if delete_files:
-        rows = conn.execute(
-            "SELECT path FROM captures WHERE layer=?",
-            (layer,)
-        ).fetchall()
+        rows = conn.execute("SELECT path FROM captures WHERE layer=?", (layer,)).fetchall()
         for (rel_path,) in rows:
             rel_norm = (rel_path or "").replace("\\", "/")
             if rel_norm.startswith(f"{LAYERS_ROOT_REL}/"):
@@ -595,12 +547,12 @@ def library_delete_layer():
         "deleted_db": deleted,
         "deleted_files": files_removed if delete_files else None
     })
-    
+
+# ----------------- PANTALLA TRAINING -----------------
 @app.route("/training")
 @login_required
 def training():
     return render_template("training.html")
-
 
 # ====== ENTRENAMIENTO / ANOTACIÓN ======
 CLASSES_FILE = os.path.join(os.getcwd(), "classes.txt")
@@ -624,17 +576,15 @@ def _classes_list():
         return []
     with open(CLASSES_FILE, "r", encoding="utf-8") as fh:
         return [l.strip() for l in fh if l.strip()]
-    
+
 @app.route("/annotate/classes")
 @login_required
 def annotate_classes():
-    path = os.path.join(os.getcwd(), "classes.txt")
-    if not os.path.isfile(path):
+    if not os.path.isfile(CLASSES_FILE):
         return jsonify({"classes": []})
-    with open(path, "r", encoding="utf-8") as fh:
+    with open(CLASSES_FILE, "r", encoding="utf-8") as fh:
         classes = [l.strip() for l in fh if l.strip()]
     return jsonify({"classes": classes})
-
 
 @app.route("/annotate/save", methods=["POST"])
 @login_required
@@ -658,12 +608,10 @@ def annotate_save():
     if not image or not label or not isinstance(boxes, list):
         return jsonify({"error": "payload incompleto"}), 400
 
-    # localizar imagen
     img_abs = os.path.join(app.static_folder, "dataset", split, "images", image)
     if not os.path.isfile(img_abs):
         return jsonify({"error": f"imagen no encontrada en {split}/images/{image}"}), 404
 
-    # dims
     try:
         from PIL import Image
         with Image.open(img_abs) as im:
@@ -671,7 +619,6 @@ def annotate_save():
     except Exception as e:
         return jsonify({"error": f"PIL no pudo abrir imagen: {e}"}), 500
 
-    # classes
     classes = _classes_list()
     if not classes:
         return jsonify({"error": "classes.txt no encontrado o vacío"}), 400
@@ -680,24 +627,19 @@ def annotate_save():
     except ValueError:
         return jsonify({"error": f"label '{label}' no está en classes.txt"}), 400
 
-    # asegurar carpeta labels
     labels_dir = os.path.join(app.static_folder, "dataset", split, "labels")
     os.makedirs(labels_dir, exist_ok=True)
 
     stem, _ = os.path.splitext(image)
     txt_abs = os.path.join(labels_dir, stem + ".txt")
 
-    # normalizar y guardar (overwrite)
     lines = []
     def clamp(v, lo=0.0, hi=1.0): return max(lo, min(hi, v))
-
     for b in boxes:
         x = float(b.get("x", 0)); y = float(b.get("y", 0))
         w = float(b.get("w", 0)); h = float(b.get("h", 0))
-        # recorte dentro de imagen
         x = max(0, min(x, iw)); y = max(0, min(y, ih))
         w = max(1, min(w, iw - x)); h = max(1, min(h, ih - y))
-
         xc = (x + w/2) / iw
         yc = (y + h/2) / ih
         nw = w / iw
@@ -709,14 +651,77 @@ def annotate_save():
 
     return jsonify({"status": "ok", "saved": txt_abs.replace(app.static_folder+os.sep, "").replace("\\","/")})
 
+# ====== UPLOAD DE IMÁGENES POR SPLIT (opcionalmente con labels ya normalizados) ======
+ALLOWED_EXTS = {'.jpg', '.jpeg', '.png'}
+
+def _allowed_ext(filename: str) -> bool:
+    return os.path.splitext(filename)[1].lower() in ALLOWED_EXTS
+
+@app.route("/upload_training_image", methods=["POST"])
+@login_required
+def upload_training_image():
+    """
+    Form-Data:
+      - split: train|valid|test
+      - image: archivo .jpg/.jpeg/.png
+      - label_data: JSON opcional con [{"class_id":int,"bbox":[xc,yc,w,h]}, ...] normalizados
+    """
+    split = (request.form.get("split") or "train").lower()
+    file = request.files.get("image")
+    label_data = request.form.get("label_data")
+
+    if split not in ["train", "valid", "test"]:
+        return jsonify({"error": "split inválido"}), 400
+    if not file or not file.filename:
+        return jsonify({"error": "no se recibió imagen"}), 400
+    if not _allowed_ext(file.filename):
+        return jsonify({"error": "extensión no permitida (usa .jpg/.jpeg/.png)"}), 400
+
+    images_path = os.path.join(DATASET_ROOT, split, "images")
+    labels_path = os.path.join(DATASET_ROOT, split, "labels")
+    os.makedirs(images_path, exist_ok=True)
+    os.makedirs(labels_path, exist_ok=True)
+
+    base = secure_filename(file.filename)
+    name, ext = os.path.splitext(base)
+    candidate = base
+    abs_img = os.path.join(images_path, candidate)
+    if os.path.exists(abs_img):
+        candidate = f"{name}_{uuid4().hex[:8]}{ext}"
+        abs_img = os.path.join(images_path, candidate)
+
+    # Guardar imagen
+    file.save(abs_img)
+
+    # Guardar label si se envía
+    saved_label = None
+    if label_data:
+        try:
+            boxes = json.loads(label_data)
+        except Exception as e:
+            return jsonify({"error": f"label_data inválido: {e}"}), 400
+
+        stem, _ = os.path.splitext(candidate)
+        abs_txt = os.path.join(labels_path, f"{stem}.txt")
+        with open(abs_txt, "w", encoding="utf-8") as f:
+            for box in boxes or []:
+                cls = int(box.get("class_id", 0))
+                xc, yc, w, h = box.get("bbox", [0,0,0,0])
+                f.write(f"{cls} {float(xc):.6f} {float(yc):.6f} {float(w):.6f} {float(h):.6f}\n")
+        saved_label = os.path.relpath(abs_txt, app.static_folder).replace("\\","/")
+
+    return jsonify({
+        "status": "ok",
+        "split": split,
+        "image": os.path.relpath(abs_img, app.static_folder).replace("\\","/"),
+        "label": saved_label
+    })
 
 # ----------------- MAIN -----------------
 if __name__ == "__main__":
-    # Estado limpio
     with lock:
         state.update({"images": [], "running": False, "stopped": False, "error": None})
 
-    # Inicializa DB + usuario demo
     init_db()
     create_user(
         name="Miguel Rodríguez",
@@ -725,5 +730,4 @@ if __name__ == "__main__":
         password="rdt1234"  # ⚠️ cambia en prod
     )
 
-    # Nota: no arrancamos hilo automáticamente
     app.run(host="127.0.0.1", port=5000, debug=False)

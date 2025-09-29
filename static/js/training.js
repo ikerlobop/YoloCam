@@ -2,7 +2,7 @@
 const splitSelect = document.getElementById('splitSelect');
 const imageSelect = document.getElementById('imageSelect');
 const loadImageBtn = document.getElementById('loadImageBtn');
-const classInput = document.getElementById('classInput');
+const classSelect = document.getElementById('classSelect');
 const zoomInBtn = document.getElementById('zoomInBtn');
 const zoomOutBtn = document.getElementById('zoomOutBtn');
 const resetViewBtn = document.getElementById('resetViewBtn');
@@ -10,6 +10,10 @@ const undoBoxBtn = document.getElementById('undoBoxBtn');
 const clearBoxesBtn = document.getElementById('clearBoxesBtn');
 const saveAnnBtn = document.getElementById('saveAnnBtn');
 const hud = document.getElementById('hud');
+
+const fileInput = document.getElementById('fileInput');
+const uploadBtn  = document.getElementById('uploadBtn');
+const uploadInfo = document.getElementById('uploadInfo');
 
 const tCanvas = document.getElementById('trainCanvas');
 const tCtx = tCanvas.getContext('2d');
@@ -24,6 +28,17 @@ let tPrevW = 0, tPrevH = 0;
 let tMouseX = 0, tMouseY = 0;
 let currentSplit = 'train';
 let currentImage = null;
+
+async function loadClasses() {
+  const resp = await fetch('/annotate/classes');
+  const data = await resp.json();
+  classSelect.innerHTML = '';
+  (data.classes || []).forEach((c, i) => {
+    const opt = document.createElement('option');
+    opt.value = c; opt.textContent = `${i} — ${c}`;
+    classSelect.appendChild(opt);
+  });
+}
 
 async function loadImageList() {
   currentSplit = splitSelect.value || 'train';
@@ -59,20 +74,6 @@ function drawCrosshair(x, y) {
   tCtx.stroke();
 }
 
-const classSelect = document.getElementById('classSelect');
-
-async function loadClasses() {
-  const resp = await fetch('/annotate/classes');
-  const data = await resp.json();
-  classSelect.innerHTML = '';
-  (data.classes || []).forEach((c, i) => {
-    const opt = document.createElement('option');
-    opt.value = c; opt.textContent = `${i} — ${c}`;
-    classSelect.appendChild(opt);
-  });
-}
-
-
 function redrawTrain() {
   tCtx.clearRect(0,0,tCanvas.width,tCanvas.height);
   if (!tLoaded) return;
@@ -101,7 +102,10 @@ function redrawTrain() {
 }
 
 // eventos
-splitSelect.addEventListener('change', loadImageList);
+splitSelect.addEventListener('change', async () => {
+  await loadImageList();
+  currentImage = null; tLoaded = false; tBoxes = []; redrawTrain();
+});
 
 loadImageBtn.addEventListener('click', () => {
   const name = imageSelect.value;
@@ -145,7 +149,7 @@ tCanvas.addEventListener('mouseup', () => {
   redrawTrain();
 });
 
-// zoom
+// zoom botones
 function zoomAt(factor, cx, cy) {
   const before = screenToImage(cx, cy);
   tScale *= factor;
@@ -158,7 +162,7 @@ zoomInBtn.addEventListener('click', () => zoomAt(1.1, tCanvas.width/2, tCanvas.h
 zoomOutBtn.addEventListener('click', () => zoomAt(1/1.1, tCanvas.width/2, tCanvas.height/2));
 resetViewBtn.addEventListener('click', () => { if (tLoaded) { fitToCanvas(); redrawTrain(); } });
 
-// rueda
+// zoom rueda
 tCanvas.addEventListener('wheel', (e) => {
   e.preventDefault();
   const factor = e.deltaY < 0 ? 1.1 : 1/1.1;
@@ -169,7 +173,7 @@ tCanvas.addEventListener('wheel', (e) => {
 undoBoxBtn.addEventListener('click', () => { tBoxes.pop(); redrawTrain(); });
 clearBoxesBtn.addEventListener('click', () => { tBoxes = []; redrawTrain(); });
 
-// guardar
+// guardar anotación -> usa /annotate/save (label por nombre; cajas en PIXELES)
 saveAnnBtn?.addEventListener('click', async () => {
   if (!tLoaded || !currentImage) { alert("Carga una imagen."); return; }
   const label = classSelect?.value;
@@ -177,8 +181,7 @@ saveAnnBtn?.addEventListener('click', async () => {
 
   const payload = { split: currentSplit, image: currentImage, label, boxes: tBoxes };
   const resp = await fetch('/annotate/save', {
-    method: 'POST',
-    headers: {'Content-Type':'application/json'},
+    method: 'POST', headers: {'Content-Type':'application/json'},
     body: JSON.stringify(payload)
   });
   const data = await resp.json();
@@ -186,9 +189,49 @@ saveAnnBtn?.addEventListener('click', async () => {
   else alert(`Error: ${data.error || 'fallo al guardar'}`);
 });
 
-// init
-window.addEventListener('DOMContentLoaded', () => {
-  loadClasses();
-  loadImageList();
+// subir imágenes al split seleccionado (opcional label_data normalizado)
+uploadBtn?.addEventListener('click', async () => {
+  const files = fileInput?.files;
+  if (!files || files.length === 0) {
+    alert("Selecciona al menos una imagen (.jpg/.png).");
+    return;
+  }
+  const split = splitSelect.value || 'train';
+  const fd = new FormData();
+  fd.append('split', split);
+  for (const f of files) fd.append('image', f, f.name); // se envía una a una (este botón sube la primera)
+  // Si quisieras enviar label_data normalizado, añade: fd.append('label_data', JSON.stringify([...]));
+
+  uploadBtn.disabled = true;
+  uploadInfo.textContent = "Subiendo...";
+  try {
+    // subimos una a una para feedback claro
+    let saved = 0, errs = 0;
+    for (const f of files) {
+      const per = new FormData();
+      per.append('split', split);
+      per.append('image', f, f.name);
+      const r = await fetch('/upload_training_image', { method: 'POST', body: per });
+      if (r.ok) saved++; else errs++;
+    }
+    await loadImageList();
+    uploadInfo.textContent = `Subidas: ${saved} | Errores: ${errs}`;
+    // auto-cargar la última si hay
+    if (imageSelect.options.length > 0) {
+      imageSelect.selectedIndex = imageSelect.options.length - 1;
+      loadImageBtn.click();
+    }
+  } catch (e) {
+    console.error(e);
+    uploadInfo.textContent = "Error al subir.";
+  } finally {
+    uploadBtn.disabled = false;
+    fileInput.value = "";
+  }
 });
 
+// init
+window.addEventListener('DOMContentLoaded', async () => {
+  await loadClasses();
+  await loadImageList();
+});
