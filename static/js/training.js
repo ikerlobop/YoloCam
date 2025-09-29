@@ -235,3 +235,52 @@ window.addEventListener('DOMContentLoaded', async () => {
   await loadClasses();
   await loadImageList();
 });
+
+function buildImageUrl(split, name) {
+  // Ruta directa al archivo en /static
+  return `/static/dataset/${split}/images/${encodeURIComponent(name)}`;
+}
+
+function updatePreview() {
+  const split = document.getElementById('splitSelect')?.value || 'train';
+  const imgName = document.getElementById('imageSelect')?.value;
+  const thumb = document.getElementById('imgThumb');
+  if (!thumb) return;
+
+  if (!imgName) {
+    thumb.classList.remove('show');
+    thumb.removeAttribute('src');
+    thumb.removeAttribute('data-full');
+    return;
+  }
+  const url = buildImageUrl(split, imgName);
+  thumb.src = url;
+  thumb.dataset.full = url;
+  thumb.classList.add('show');
+}
+
+// Abrir / cerrar lightbox
+document.getElementById('imgThumb')?.addEventListener('click', () => {
+  const full = document.getElementById('imgFull');
+  full.src = document.getElementById('imgThumb').dataset.full || '';
+  document.getElementById('imgLightbox').classList.remove('hidden');
+});
+
+function closePreview(e) {
+  e.stopPropagation();
+  document.getElementById('imgLightbox').classList.add('hidden');
+}
+
+// Reaccionar a cambios del split y de la imagen
+document.getElementById('splitSelect')?.addEventListener('change', () => {
+  // si al cambiar split recargas las opciones de imágenes vía fetch,
+  // llama a updatePreview() después de rellenar el <select>.
+  setTimeout(updatePreview, 0);
+});
+document.getElementById('imageSelect')?.addEventListener('change', updatePreview);
+
+// Llamada inicial (cuando ya llenaste el select de imágenes)
+window.addEventListener('DOMContentLoaded', () => {
+  // si ya cargas la lista vía /annotate/images, invoca updatePreview al terminar.
+  updatePreview();
+});

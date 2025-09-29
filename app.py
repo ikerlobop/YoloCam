@@ -8,8 +8,10 @@ import random
 import sqlite3
 import shutil
 import json
+import sys, subprocess
 from uuid import uuid4
 from typing import List, Optional
+
 
 import psutil
 from flask import (
@@ -742,6 +744,28 @@ def dataset_list():
         items = _list_split_items(sp)
         data[sp] = {"count": len(items), "items": items}
     return jsonify(data)
+
+@app.route("/dataset/open_folder/<split>", methods=["POST"])
+@login_required
+def open_folder(split):
+    split = (split or "").lower()
+    if split not in ("train", "valid", "test"):
+        return jsonify({"error": "split inválido"}), 400
+
+    folder = os.path.join(app.static_folder, "dataset", split, "images")
+    if not os.path.isdir(folder):
+        return jsonify({"error": f"no existe: {folder}"}), 404
+
+    try:
+        if sys.platform.startswith("win"):
+            os.startfile(folder)  # Explorer (Windows)
+        elif sys.platform.startswith("darwin"):
+            subprocess.Popen(["open", folder])  # Finder (macOS)
+        else:
+            subprocess.Popen(["xdg-open", folder])  # Linux
+        return jsonify({"status": "ok"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 # ----------------- MAIN -----------------

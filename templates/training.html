@@ -39,6 +39,18 @@
 
           <label>Imagen:</label>
           <select id="imageSelect" style="min-width:260px;"></select>
+          <!-- Preview pequeño -->
+          <div class="image-preview" title="Click para ampliar">
+            <img id="imgThumb" alt="Vista previa" />
+          </div>
+
+          <!-- Lightbox para ampliar -->
+          <div id="imgLightbox" class="modal hidden" onclick="closePreview(event)">
+            <div class="modal-inner">
+              <img id="imgFull" alt="Imagen completa">
+              <button class="modal-close" onclick="closePreview(event)">×</button>
+            </div>
+          </div>
           <button id="loadImageBtn" class="btn-small">Cargar</button>
 
           <label>Clase:</label>
