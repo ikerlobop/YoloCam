@@ -1,0 +1,9 @@
+# Ignorar contenido generado dinámicamente
+static/layers/*
+static/captures/*
+static/dataset/*
+
+# Mantener carpetas vacías
+!static/layers/.gitkeep
+!static/captures/.gitkeep
+!static/dataset/.gitkeep
