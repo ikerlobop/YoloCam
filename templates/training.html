@@ -9,10 +9,6 @@
     .train-page { min-height: 100vh; display:flex; flex-direction:column; background:#0f0f12; color:#fff; }
     .train-topbar { display:flex; align-items:center; gap:12px; padding:10px 14px; border-bottom:1px solid #2a2a35; background:#141419; }
     .train-topbar .spacer{flex:1}
-    .train-body { flex:1; display:flex; flex-direction:column; gap:12px; padding:12px; }
-    .train-toolbar .row { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
-    .train-canvas-wrap { display:flex; align-items:center; justify-content:center; background:#111; border:1px solid #2a2a35; border-radius:8px; padding:8px; }
-    #trainCanvas { background:#000; border:1px solid #00ff41; cursor:none; }
     .hud { margin-left:auto; font-size:12px; opacity:.8; }
     .btn-link { color:#fff; text-decoration:none; }
     input[type="file"]{max-width:260px}
@@ -30,6 +26,7 @@
     <div class="train-body">
       <div class="train-toolbar">
         <div class="row">
+          <!-- Selección de Split -->
           <label>Split:</label>
           <select id="splitSelect">
             <option value="train">train</option>
@@ -37,11 +34,13 @@
             <option value="test">test</option>
           </select>
 
-          <label>Imagen:</label>
-          <select id="imageSelect" style="min-width:260px;"></select>
-          <!-- Preview pequeño -->
-          <div class="image-preview" title="Click para ampliar">
-            <img id="imgThumb" alt="Vista previa" />
+          <!-- Filmstrip -->
+          <div class="filmstrip">
+            <button class="strip-btn" id="stripPrev" title="Anterior">◀</button>
+            <div class="strip-view">
+              <div id="stripTrack" class="strip-track"></div>
+            </div>
+            <button class="strip-btn" id="stripNext" title="Siguiente">▶</button>
           </div>
 
           <!-- Lightbox para ampliar -->
@@ -51,11 +50,15 @@
               <button class="modal-close" onclick="closePreview(event)">×</button>
             </div>
           </div>
+
+          <!-- Botón de cargar imagen -->
           <button id="loadImageBtn" class="btn-small">Cargar</button>
 
+          <!-- Selección de clase -->
           <label>Clase:</label>
           <select id="classSelect" style="min-width:180px;"></select>
 
+          <!-- Herramientas -->
           <button id="zoomInBtn" class="btn-small">+</button>
           <button id="zoomOutBtn" class="btn-small">-</button>
           <button id="resetViewBtn" class="btn-small">Reset vista</button>
@@ -66,6 +69,7 @@
           <div id="hud" class="hud"></div>
         </div>
 
+        <!-- Subida de imágenes -->
         <div class="row">
           <label>Subir imágenes:</label>
           <input id="fileInput" type="file" accept=".jpg,.jpeg,.png" multiple>
@@ -74,6 +78,7 @@
         </div>
       </div>
 
+      <!-- Canvas principal -->
       <div class="train-canvas-wrap">
         <canvas id="trainCanvas" width="960" height="640"></canvas>
       </div>

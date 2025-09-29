@@ -1,79 +1,75 @@
-// --- refs UI ---
-const splitSelect = document.getElementById('splitSelect');
-const imageSelect = document.getElementById('imageSelect');
-const loadImageBtn = document.getElementById('loadImageBtn');
-const classSelect = document.getElementById('classSelect');
-const zoomInBtn = document.getElementById('zoomInBtn');
-const zoomOutBtn = document.getElementById('zoomOutBtn');
-const resetViewBtn = document.getElementById('resetViewBtn');
-const undoBoxBtn = document.getElementById('undoBoxBtn');
+// =======================================================
+// 1) REFS UI
+// =======================================================
+const splitSelect   = document.getElementById('splitSelect');
+const loadImageBtn  = document.getElementById('loadImageBtn');
+const classSelect   = document.getElementById('classSelect');
+const zoomInBtn     = document.getElementById('zoomInBtn');
+const zoomOutBtn    = document.getElementById('zoomOutBtn');
+const resetViewBtn  = document.getElementById('resetViewBtn');
+const undoBoxBtn    = document.getElementById('undoBoxBtn');
 const clearBoxesBtn = document.getElementById('clearBoxesBtn');
-const saveAnnBtn = document.getElementById('saveAnnBtn');
-const hud = document.getElementById('hud');
+const saveAnnBtn    = document.getElementById('saveAnnBtn');
+const hud           = document.getElementById('hud');
 
-const fileInput = document.getElementById('fileInput');
+const fileInput  = document.getElementById('fileInput');
 const uploadBtn  = document.getElementById('uploadBtn');
 const uploadInfo = document.getElementById('uploadInfo');
 
 const tCanvas = document.getElementById('trainCanvas');
-const tCtx = tCanvas.getContext('2d');
+const tCtx    = tCanvas.getContext('2d');
 
-let tImg = new Image();
-let tLoaded = false;
-let tScale = 1, tOffX = 0, tOffY = 0;
-let tBoxes = [];
+// Filmstrip
+const stripPrev  = document.getElementById('stripPrev');
+const stripNext  = document.getElementById('stripNext');
+const stripTrack = document.getElementById('stripTrack');
+
+// Lightbox (opcional)
+const imgFull     = document.getElementById('imgFull');
+const imgLightbox = document.getElementById('imgLightbox');
+
+// =======================================================
+// 2) ESTADO
+// =======================================================
+let tImg     = new Image();
+let tLoaded  = false;
+let tScale   = 1, tOffX = 0, tOffY = 0;
+let tBoxes   = [];
 let tDrawing = false;
-let tStartX = 0, tStartY = 0;
-let tPrevW = 0, tPrevH = 0;
-let tMouseX = 0, tMouseY = 0;
-let currentSplit = 'train';
-let currentImage = null;
+let tStartX  = 0, tStartY = 0;
+let tPrevW   = 0, tPrevH = 0;
+let tMouseX  = 0, tMouseY  = 0;
 
-async function loadClasses() {
-  const resp = await fetch('/annotate/classes');
-  const data = await resp.json();
-  classSelect.innerHTML = '';
-  (data.classes || []).forEach((c, i) => {
-    const opt = document.createElement('option');
-    opt.value = c; opt.textContent = `${i} — ${c}`;
-    classSelect.appendChild(opt);
-  });
+let currentSplit  = 'train';
+let currentImage  = null;
+
+let imageListCache = []; // nombres archivo del split
+let currentIndex   = -1; // índice activo en imageListCache
+
+// =======================================================
+// 3) UTILS
+// =======================================================
+function buildImageUrl(split, name) {
+  return `/static/dataset/${split}/images/${encodeURIComponent(name)}`;
 }
-
-async function loadImageList() {
-  currentSplit = splitSelect.value || 'train';
-  const resp = await fetch(`/annotate/images?split=${encodeURIComponent(currentSplit)}`);
-  const data = await resp.json();
-  imageSelect.innerHTML = '';
-  (data.images || []).forEach(name => {
-    const opt = document.createElement('option');
-    opt.value = name; opt.textContent = name;
-    imageSelect.appendChild(opt);
-  });
-  hud.textContent = `(${currentSplit}) ${data.images?.length || 0} imágenes`;
-}
-
 function fitToCanvas() {
   const iw = tImg.width, ih = tImg.height;
   const cw = tCanvas.width, ch = tCanvas.height;
   tScale = Math.min(cw/iw, ch/ih);
-  tOffX = (cw - iw * tScale) / 2;
-  tOffY = (ch - ih * tScale) / 2;
+  tOffX  = (cw - iw * tScale) / 2;
+  tOffY  = (ch - ih * tScale) / 2;
 }
-
 function screenToImage(px, py) {
   return { ix: (px - tOffX) / tScale, iy: (py - tOffY) / tScale };
 }
-
 function drawCrosshair(x, y) {
   tCtx.strokeStyle = 'lime';
-  tCtx.lineWidth = 1;
+  tCtx.lineWidth   = 1;
   tCtx.beginPath();
   tCtx.moveTo(x - 10, y); tCtx.lineTo(x + 10, y);
   tCtx.moveTo(x, y - 10); tCtx.lineTo(x, y + 10);
   tCtx.stroke();
 }
-
 function redrawTrain() {
   tCtx.clearRect(0,0,tCanvas.width,tCanvas.height);
   if (!tLoaded) return;
@@ -100,27 +96,136 @@ function redrawTrain() {
     ? `img: ${currentImage} | zoom ${(tScale*100).toFixed(0)}% | cajas ${tBoxes.length}`
     : `(${currentSplit}) listo`;
 }
+function setActiveThumbByIndex(i) {
+  if (!stripTrack) return;
+  stripTrack.querySelectorAll('.strip-thumb').forEach((el, k) => {
+    el.classList.toggle('active', k === i);
+  });
+  const active = stripTrack.children[i];
+  if (active) active.scrollIntoView({ inline:'center', behavior:'smooth', block:'nearest' });
+}
 
-// eventos
-splitSelect.addEventListener('change', async () => {
-  await loadImageList();
-  currentImage = null; tLoaded = false; tBoxes = []; redrawTrain();
-});
+// =======================================================
+// 4) CARGA DE CLASES E IMÁGENES
+// =======================================================
+async function loadClasses() {
+  const resp = await fetch('/annotate/classes');
+  const data = await resp.json();
+  classSelect.innerHTML = '';
+  (data.classes || []).forEach((c, i) => {
+    const opt = document.createElement('option');
+    opt.value = c; opt.textContent = `${i} — ${c}`;
+    classSelect.appendChild(opt);
+  });
+}
 
-loadImageBtn.addEventListener('click', () => {
-  const name = imageSelect.value;
+async function loadImageList() {
+  currentSplit = splitSelect.value || 'train';
+  const resp = await fetch(`/annotate/images?split=${encodeURIComponent(currentSplit)}`);
+  const data = await resp.json();
+
+  imageListCache = data.images || [];
+  buildFilmstrip(imageListCache);
+
+  if (imageListCache.length > 0) {
+    currentIndex = 0;              // <-- antes: length - 1
+    loadImageByIndex(currentIndex); // carga la primera
+    setActiveThumbByIndex(currentIndex, { scroll:false }); // <-- no hacer scroll
+  } else {
+    currentIndex = -1;
+    currentImage = null;
+    tLoaded = false; tBoxes = []; redrawTrain();
+  }
+
+  hud.textContent = `(${currentSplit}) ${imageListCache.length} imágenes`;
+}
+
+
+// =======================================================
+// 5) CARGA Y NAVEGACIÓN
+// =======================================================
+function loadImageByName(name) {
   if (!name) return;
   currentImage = name;
   tImg = new Image();
-  tImg.src = `/static/dataset/${currentSplit}/images/${name}`;
+  tImg.src = buildImageUrl(currentSplit, name);
   tImg.onload = () => {
     tLoaded = true;
     fitToCanvas();
-    tBoxes = [];
+    tBoxes = []; // limpia cajas al cargar
     redrawTrain();
+    currentIndex = imageListCache.findIndex(n => n === name);
+    setActiveThumbByIndex(currentIndex);
   };
+}
+
+function loadImageByIndex(i) {
+  if (i < 0 || i >= imageListCache.length) return;
+  const name = imageListCache[i];
+  loadImageByName(name);
+}
+
+function goRelative(step) {
+  if (!imageListCache.length) return;
+  if (currentIndex < 0) currentIndex = 0;
+  let next = currentIndex + step;
+  next = Math.max(0, Math.min(next, imageListCache.length - 1));
+  if (next !== currentIndex) {
+    currentIndex = next;
+    loadImageByIndex(currentIndex);
+  }
+}
+
+// =======================================================
+// 6) FILMSTRIP
+// =======================================================
+function buildFilmstrip(images) {
+  if (!stripTrack) return;
+  stripTrack.innerHTML = '';
+
+  const split = splitSelect.value || 'train';
+  (images || []).forEach((name, i) => {
+    const item = document.createElement('div');
+    item.className = 'strip-thumb';
+    item.title     = name;
+
+    const img = document.createElement('img');
+    img.loading = 'lazy';
+    img.src     = buildImageUrl(split, name);
+
+    const label = document.createElement('div');
+    label.className = 'name';
+    label.textContent = name;
+
+    item.appendChild(img);
+    item.appendChild(label);
+
+    item.addEventListener('click', () => {
+      currentIndex = i;
+      loadImageByIndex(currentIndex);
+    });
+
+    stripTrack.appendChild(item);
+  });
+
+  setActiveThumbByIndex(currentIndex);
+}
+
+// =======================================================
+// 7) EVENTOS
+// =======================================================
+
+// Split cambiado
+splitSelect.addEventListener('change', async () => {
+  await loadImageList();
 });
 
+// Cargar (por si quieres forzar recarga de la actual)
+loadImageBtn.addEventListener('click', () => {
+  if (currentIndex >= 0) loadImageByIndex(currentIndex);
+});
+
+// Canvas interacciones
 tCanvas.addEventListener('mousemove', (e) => {
   const r = tCanvas.getBoundingClientRect();
   tMouseX = e.clientX - r.left; tMouseY = e.clientY - r.top;
@@ -130,7 +235,6 @@ tCanvas.addEventListener('mousemove', (e) => {
   }
   redrawTrain();
 });
-
 tCanvas.addEventListener('mousedown', (e) => {
   if (!tLoaded) return;
   const r = tCanvas.getBoundingClientRect();
@@ -138,7 +242,6 @@ tCanvas.addEventListener('mousedown', (e) => {
   const {ix, iy} = screenToImage(sx, sy);
   tDrawing = true; tStartX = ix; tStartY = iy; tPrevW = 0; tPrevH = 0;
 });
-
 tCanvas.addEventListener('mouseup', () => {
   if (!tDrawing) return;
   tDrawing = false;
@@ -149,7 +252,7 @@ tCanvas.addEventListener('mouseup', () => {
   redrawTrain();
 });
 
-// zoom botones
+// Zoom
 function zoomAt(factor, cx, cy) {
   const before = screenToImage(cx, cy);
   tScale *= factor;
@@ -162,18 +265,17 @@ zoomInBtn.addEventListener('click', () => zoomAt(1.1, tCanvas.width/2, tCanvas.h
 zoomOutBtn.addEventListener('click', () => zoomAt(1/1.1, tCanvas.width/2, tCanvas.height/2));
 resetViewBtn.addEventListener('click', () => { if (tLoaded) { fitToCanvas(); redrawTrain(); } });
 
-// zoom rueda
 tCanvas.addEventListener('wheel', (e) => {
   e.preventDefault();
   const factor = e.deltaY < 0 ? 1.1 : 1/1.1;
   zoomAt(factor, tMouseX, tMouseY);
 }, {passive:false});
 
-// edición
+// Edición cajas
 undoBoxBtn.addEventListener('click', () => { tBoxes.pop(); redrawTrain(); });
 clearBoxesBtn.addEventListener('click', () => { tBoxes = []; redrawTrain(); });
 
-// guardar anotación -> usa /annotate/save (label por nombre; cajas en PIXELES)
+// Guardado
 saveAnnBtn?.addEventListener('click', async () => {
   if (!tLoaded || !currentImage) { alert("Carga una imagen."); return; }
   const label = classSelect?.value;
@@ -189,7 +291,7 @@ saveAnnBtn?.addEventListener('click', async () => {
   else alert(`Error: ${data.error || 'fallo al guardar'}`);
 });
 
-// subir imágenes al split seleccionado (opcional label_data normalizado)
+// Subida
 uploadBtn?.addEventListener('click', async () => {
   const files = fileInput?.files;
   if (!files || files.length === 0) {
@@ -197,15 +299,10 @@ uploadBtn?.addEventListener('click', async () => {
     return;
   }
   const split = splitSelect.value || 'train';
-  const fd = new FormData();
-  fd.append('split', split);
-  for (const f of files) fd.append('image', f, f.name); // se envía una a una (este botón sube la primera)
-  // Si quisieras enviar label_data normalizado, añade: fd.append('label_data', JSON.stringify([...]));
 
   uploadBtn.disabled = true;
   uploadInfo.textContent = "Subiendo...";
   try {
-    // subimos una a una para feedback claro
     let saved = 0, errs = 0;
     for (const f of files) {
       const per = new FormData();
@@ -216,11 +313,6 @@ uploadBtn?.addEventListener('click', async () => {
     }
     await loadImageList();
     uploadInfo.textContent = `Subidas: ${saved} | Errores: ${errs}`;
-    // auto-cargar la última si hay
-    if (imageSelect.options.length > 0) {
-      imageSelect.selectedIndex = imageSelect.options.length - 1;
-      loadImageBtn.click();
-    }
   } catch (e) {
     console.error(e);
     uploadInfo.textContent = "Error al subir.";
@@ -230,57 +322,29 @@ uploadBtn?.addEventListener('click', async () => {
   }
 });
 
-// init
-window.addEventListener('DOMContentLoaded', async () => {
-  await loadClasses();
-  await loadImageList();
+// Teclado
+window.addEventListener('keydown', (e) => {
+  if (e.target && ['INPUT','SELECT','TEXTAREA'].includes(e.target.tagName)) return;
+  if (e.key === 'ArrowLeft')  { e.preventDefault(); goRelative(-1); }
+  if (e.key === 'ArrowRight') { e.preventDefault(); goRelative(+1); }
+  if (e.key === 'PageUp')     { e.preventDefault(); goRelative(-5); }
+  if (e.key === 'PageDown')   { e.preventDefault(); goRelative(+5); }
 });
 
-function buildImageUrl(split, name) {
-  // Ruta directa al archivo en /static
-  return `/static/dataset/${split}/images/${encodeURIComponent(name)}`;
-}
+// Botones filmstrip
+stripPrev?.addEventListener('click', () => goRelative(-1));
+stripNext?.addEventListener('click', () => goRelative(+1));
 
-function updatePreview() {
-  const split = document.getElementById('splitSelect')?.value || 'train';
-  const imgName = document.getElementById('imageSelect')?.value;
-  const thumb = document.getElementById('imgThumb');
-  if (!thumb) return;
-
-  if (!imgName) {
-    thumb.classList.remove('show');
-    thumb.removeAttribute('src');
-    thumb.removeAttribute('data-full');
-    return;
-  }
-  const url = buildImageUrl(split, imgName);
-  thumb.src = url;
-  thumb.dataset.full = url;
-  thumb.classList.add('show');
-}
-
-// Abrir / cerrar lightbox
-document.getElementById('imgThumb')?.addEventListener('click', () => {
-  const full = document.getElementById('imgFull');
-  full.src = document.getElementById('imgThumb').dataset.full || '';
-  document.getElementById('imgLightbox').classList.remove('hidden');
-});
-
+// Lightbox helpers (opcional)
 function closePreview(e) {
   e.stopPropagation();
-  document.getElementById('imgLightbox').classList.add('hidden');
+  imgLightbox?.classList.add('hidden');
 }
 
-// Reaccionar a cambios del split y de la imagen
-document.getElementById('splitSelect')?.addEventListener('change', () => {
-  // si al cambiar split recargas las opciones de imágenes vía fetch,
-  // llama a updatePreview() después de rellenar el <select>.
-  setTimeout(updatePreview, 0);
-});
-document.getElementById('imageSelect')?.addEventListener('change', updatePreview);
-
-// Llamada inicial (cuando ya llenaste el select de imágenes)
-window.addEventListener('DOMContentLoaded', () => {
-  // si ya cargas la lista vía /annotate/images, invoca updatePreview al terminar.
-  updatePreview();
+// =======================================================
+// 8) INIT
+// =======================================================
+window.addEventListener('DOMContentLoaded', async () => {
+  await loadClasses();
+  await loadImageList();  // construye filmstrip y auto-carga una imagen
 });
