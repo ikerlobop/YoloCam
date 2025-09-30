@@ -5,17 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Entrenamiento — ATL RDT</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
-  <style>
-    .train-page { min-height: 100vh; display:flex; flex-direction:column; background:#0f0f12; color:#fff; }
-    .train-topbar { display:flex; align-items:center; gap:12px; padding:10px 14px; border-bottom:1px solid #2a2a35; background:#141419; }
-    .train-topbar .spacer{flex:1}
-    .hud { margin-left:auto; font-size:12px; opacity:.8; }
-    .btn-link { color:#fff; text-decoration:none; }
-    input[type="file"]{max-width:260px}
-  </style>
 </head>
 <body>
   <div class="train-page">
+    <!-- Barra superior -->
     <div class="train-topbar">
       <a class="btn-small btn-link" href="/">← Volver a principal</a>
       <div style="font-weight:600;">Modo Entrenamiento</div>
@@ -23,11 +16,13 @@
       <div id="userName" style="opacity:.8;"></div>
     </div>
 
+    <!-- Cuerpo -->
     <div class="train-body">
+      <!-- Toolbar -->
       <div class="train-toolbar">
-        <div class="row">
-          <!-- Selección de Split -->
-          <label>Split:</label>
+        <div class="row" style="gap:12px; align-items:center; flex-wrap:wrap;">
+          <!-- Split -->
+          <label for="splitSelect">Split:</label>
           <select id="splitSelect">
             <option value="train">train</option>
             <option value="valid">valid</option>
@@ -43,19 +38,11 @@
             <button class="strip-btn" id="stripNext" title="Siguiente">▶</button>
           </div>
 
-          <!-- Lightbox para ampliar -->
-          <div id="imgLightbox" class="modal hidden" onclick="closePreview(event)">
-            <div class="modal-inner">
-              <img id="imgFull" alt="Imagen completa">
-              <button class="modal-close" onclick="closePreview(event)">×</button>
-            </div>
-          </div>
-
-          <!-- Botón de cargar imagen -->
+          <!-- Cargar imagen actual -->
           <button id="loadImageBtn" class="btn-small">Cargar</button>
 
-          <!-- Selección de clase -->
-          <label>Clase:</label>
+          <!-- Clase -->
+          <label for="classSelect">Clase:</label>
           <select id="classSelect" style="min-width:180px;"></select>
 
           <!-- Herramientas -->
@@ -63,15 +50,16 @@
           <button id="zoomOutBtn" class="btn-small">-</button>
           <button id="resetViewBtn" class="btn-small">Reset vista</button>
           <button id="undoBoxBtn" class="btn-small">Deshacer</button>
-          <button id="clearBoxesBtn" class="btn-small warn">Reset cajas</button>
+          <button id="clearBoxesBtn" class="btn-small btn-warn">Reset cajas</button>
           <button id="saveAnnBtn" class="btn-small success">Guardar anotación</button>
 
+          <!-- HUD -->
           <div id="hud" class="hud"></div>
         </div>
 
         <!-- Subida de imágenes -->
-        <div class="row">
-          <label>Subir imágenes:</label>
+        <div class="row" style="gap:10px; align-items:center; flex-wrap:wrap; margin-top:8px;">
+          <label for="fileInput">Subir imágenes:</label>
           <input id="fileInput" type="file" accept=".jpg,.jpeg,.png" multiple>
           <button id="uploadBtn" class="btn-small">Subir al split</button>
           <span id="uploadInfo" style="font-size:12px;opacity:.8;"></span>
@@ -85,6 +73,17 @@
     </div>
   </div>
 
+  <!-- Lightbox / Ampliación con overlay para bboxes -->
+  <div id="imgLightbox" class="modal hidden" onclick="closePreview(event)">
+    <div class="modal-inner">
+      <img id="imgFull" alt="Imagen completa">
+      <!-- Overlay opcional fijo (si prefieres, el JS lo crea dinámicamente) -->
+      <!-- <div id="lightboxOverlay" class="bbox-layer"></div> -->
+      <button class="modal-close" onclick="closePreview(event)">×</button>
+    </div>
+  </div>
+
+  <!-- JS -->
   <script src="{{ url_for('static', filename='js/training.js') }}"></script>
 </body>
 </html>

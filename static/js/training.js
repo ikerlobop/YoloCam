@@ -46,12 +46,18 @@ let currentImage  = null;
 let imageListCache = []; // nombres archivo del split
 let currentIndex   = -1; // índice activo en imageListCache
 
+// Estado de arrastre para filmstrip
+let fsDragging = false;
+let fsStartX = 0;
+let fsScrollLeft = 0;
+
 // =======================================================
-// 3) UTILS
+/** 3) UTILS CANVAS & DIBUJO */
 // =======================================================
 function buildImageUrl(split, name) {
   return `/static/dataset/${split}/images/${encodeURIComponent(name)}`;
 }
+
 function fitToCanvas() {
   const iw = tImg.width, ih = tImg.height;
   const cw = tCanvas.width, ch = tCanvas.height;
@@ -59,9 +65,11 @@ function fitToCanvas() {
   tOffX  = (cw - iw * tScale) / 2;
   tOffY  = (ch - ih * tScale) / 2;
 }
+
 function screenToImage(px, py) {
   return { ix: (px - tOffX) / tScale, iy: (py - tOffY) / tScale };
 }
+
 function drawCrosshair(x, y) {
   tCtx.strokeStyle = 'lime';
   tCtx.lineWidth   = 1;
@@ -70,21 +78,82 @@ function drawCrosshair(x, y) {
   tCtx.moveTo(x, y - 10); tCtx.lineTo(x, y + 10);
   tCtx.stroke();
 }
+
+// Obtener array de nombres de clase (index -> nombre)
+function getClassListArray(){
+  return Array.from(classSelect?.options || []).map(o=>o.value);
+}
+
+// Dibuja una etiqueta con fondo sobre el canvas principal, escalada
+function drawCanvasLabel(imgX, imgY, text) {
+  // convertir a coordenadas de pantalla
+  const sx = imgX * tScale + tOffX;
+  const sy = imgY * tScale + tOffY;
+
+  // tamaño de fuente relativo al zoom (legible a cualquier escala)
+  const base = 12;                   // px a escala 1:1
+  const fontPx = Math.max(10, base / tScale);
+  tCtx.font = `${fontPx}px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`;
+
+  const paddingX = 4 / tScale;
+  const paddingY = 2 / tScale;
+
+  const metrics = tCtx.measureText(text);
+  const textW = metrics.width;
+  const textH = fontPx; // aprox
+
+  // fondo
+  tCtx.save();
+  tCtx.fillStyle = 'rgba(0,0,0,0.6)';
+  tCtx.strokeStyle = 'rgba(255,255,255,0.85)';
+  tCtx.lineWidth = 1 / tScale;
+
+  const boxX = sx;
+  const boxY = sy - (textH + 6 / tScale); // por encima del bbox
+  const boxW = textW + paddingX * 2;
+  const boxH = textH + paddingY * 2;
+
+  // Fondo rectangular
+  tCtx.beginPath();
+  tCtx.rect(boxX, boxY, boxW, boxH);
+  tCtx.fill();
+  tCtx.stroke();
+
+  // texto
+  tCtx.fillStyle = '#ffffff';
+  tCtx.fillText(text, boxX + paddingX, boxY + paddingY + textH * 0.8);
+  tCtx.restore();
+}
+
 function redrawTrain() {
   tCtx.clearRect(0,0,tCanvas.width,tCanvas.height);
-  if (!tLoaded) return;
+  if (!tLoaded) {
+    hud.textContent = `(${currentSplit}) listo`;
+    return;
+  }
 
   tCtx.save();
   tCtx.translate(tOffX, tOffY);
   tCtx.scale(tScale, tScale);
   tCtx.drawImage(tImg, 0, 0);
 
+  // BBoxes
   tCtx.lineWidth = 2 / tScale;
+  const labelNames = getClassListArray();
   tBoxes.forEach(b => {
-    tCtx.strokeStyle = 'red';
+    // caja
+    tCtx.strokeStyle = '#ff3b30';
     tCtx.strokeRect(b.x, b.y, b.w, b.h);
+
+    // etiqueta clase (encima de la caja)
+    const clsName = labelNames?.[b.cls] ?? String(b.cls ?? '');
+    if (clsName) {
+      // punto superior-izquierdo en coord. imagen
+      drawCanvasLabel(b.x, b.y, clsName);
+    }
   });
 
+  // si estamos dibujando, caja "preview"
   if (tDrawing) {
     tCtx.strokeStyle = 'lime';
     tCtx.strokeRect(tStartX, tStartY, tPrevW, tPrevH);
@@ -92,21 +161,117 @@ function redrawTrain() {
 
   tCtx.restore();
   drawCrosshair(tMouseX, tMouseY);
+
   hud.textContent = currentImage
     ? `img: ${currentImage} | zoom ${(tScale*100).toFixed(0)}% | cajas ${tBoxes.length}`
     : `(${currentSplit}) listo`;
 }
+
+// Centrar una miniatura en la vista del filmstrip
+function centerThumbInView(i) {
+  if (!stripTrack) return;
+  const el = stripTrack.children[i];
+  if (!el) return;
+
+  const trackRect = stripTrack.getBoundingClientRect();
+  const elRect = el.getBoundingClientRect();
+
+  const current = stripTrack.scrollLeft;
+  const delta = (elRect.left + elRect.width/2) - (trackRect.left + trackRect.width/2);
+  stripTrack.scrollLeft = current + delta;
+}
+
+// Marca activa y centra
 function setActiveThumbByIndex(i) {
   if (!stripTrack) return;
   stripTrack.querySelectorAll('.strip-thumb').forEach((el, k) => {
     el.classList.toggle('active', k === i);
   });
-  const active = stripTrack.children[i];
-  if (active) active.scrollIntoView({ inline:'center', behavior:'smooth', block:'nearest' });
+  centerThumbInView(i);
 }
 
 // =======================================================
-// 4) CARGA DE CLASES E IMÁGENES
+// 4) YOLO utils + overlay helpers
+// =======================================================
+function buildLabelUrl(split, name){
+  // mismo nombre pero .txt en /labels
+  const base = name.replace(/\.[^.]+$/, '');
+  return `/static/dataset/${split}/labels/${encodeURIComponent(base)}.txt`;
+}
+
+// devuelve [{cls, cx, cy, w, h}] en unidades normalizadas [0..1]
+async function fetchYoloLabels(split, name){
+  try{
+    const url = buildLabelUrl(split, name);
+    const res = await fetch(url, { cache: 'no-store' });
+    if(!res.ok) return [];
+    const txt = await res.text();
+    const lines = txt.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+    return lines.map(l => {
+      const [cls, cx, cy, w, h] = l.split(/[\s,]+/).map(Number);
+      return { cls, cx, cy, w, h };
+    });
+  }catch(e){ console.warn('labels fail', e); return []; }
+}
+
+// convierte YOLO (norm.) a {x,y,w,h} en píxeles de la imagen original
+function yoloToXYWH(label, iw, ih){
+  const x = (label.cx - label.w/2) * iw;
+  const y = (label.cy - label.h/2) * ih;
+  return { x, y, w: label.w * iw, h: label.h * ih, cls: label.cls };
+}
+
+// ====== Overlays HTML (filmstrip y lightbox) ======
+function drawOverlayBoxes(container, img, boxesPx, {labelNames=[]}={}){
+  // elimina overlay anterior
+  let overlay = container.querySelector('.bbox-layer');
+  if(!overlay){
+    overlay = document.createElement('div');
+    overlay.className = 'bbox-layer';
+    container.appendChild(overlay);
+  }
+  overlay.innerHTML = '';
+
+  // medimos cómo la imagen "encaja" (contain) dentro del contenedor
+  const cw = container.clientWidth, ch = container.clientHeight;
+  const iw = img.naturalWidth, ih = img.naturalHeight;
+  const scale = Math.min(cw/iw, ch/ih);
+  const dispW = iw * scale, dispH = ih * scale;
+  const offX = (cw - dispW) / 2;
+  const offY = (ch - dispH) / 2;
+
+  // posicionamos overlay para que coincida con el área visible de la imagen
+  overlay.style.left = offX + 'px';
+  overlay.style.top  = offY + 'px';
+  overlay.style.width  = dispW + 'px';
+  overlay.style.height = dispH + 'px';
+
+  boxesPx.forEach(b=>{
+    const bx = b.x * scale;
+    const by = b.y * scale;
+    const bw = b.w * scale;
+    const bh = b.h * scale;
+
+    const node = document.createElement('div');
+    node.className = 'bbox';
+    node.style.left = `${bx}px`;
+    node.style.top  = `${by}px`;
+    node.style.width  = `${bw}px`;
+    node.style.height = `${bh}px`;
+
+    // etiqueta (opcional)
+    const lbl = document.createElement('div');
+    lbl.className = 'bbox-label';
+    const clsName = (labelNames[b.cls] ?? String(b.cls));
+    lbl.textContent = clsName;
+    node.appendChild(lbl);
+
+    overlay.appendChild(node);
+  });
+}
+
+// =======================================================
+// 5) CARGA DE CLASES E IMÁGENES
 // =======================================================
 async function loadClasses() {
   const resp = await fetch('/annotate/classes');
@@ -128,9 +293,10 @@ async function loadImageList() {
   buildFilmstrip(imageListCache);
 
   if (imageListCache.length > 0) {
-    currentIndex = 0;              // <-- antes: length - 1
-    loadImageByIndex(currentIndex); // carga la primera
-    setActiveThumbByIndex(currentIndex, { scroll:false }); // <-- no hacer scroll
+    currentIndex = Math.max(0, Math.min(currentIndex, imageListCache.length - 1));
+    if (currentIndex < 0) currentIndex = 0;
+    loadImageByIndex(currentIndex); // carga la actual/primera
+    setActiveThumbByIndex(currentIndex);
   } else {
     currentIndex = -1;
     currentImage = null;
@@ -140,9 +306,8 @@ async function loadImageList() {
   hud.textContent = `(${currentSplit}) ${imageListCache.length} imágenes`;
 }
 
-
 // =======================================================
-// 5) CARGA Y NAVEGACIÓN
+// 6) CARGA Y NAVEGACIÓN
 // =======================================================
 function loadImageByName(name) {
   if (!name) return;
@@ -152,10 +317,17 @@ function loadImageByName(name) {
   tImg.onload = () => {
     tLoaded = true;
     fitToCanvas();
-    tBoxes = []; // limpia cajas al cargar
-    redrawTrain();
-    currentIndex = imageListCache.findIndex(n => n === name);
-    setActiveThumbByIndex(currentIndex);
+    tBoxes = []; // limpia
+
+    // cargar etiquetas YOLO para el canvas principal
+    fetchYoloLabels(currentSplit, name).then(labels=>{
+      const iw = tImg.naturalWidth, ih = tImg.naturalHeight;
+      tBoxes = labels.map(l => yoloToXYWH(l, iw, ih));
+      redrawTrain();
+    });
+
+    // resalta la miniatura activa si tenemos índice
+    if (currentIndex >= 0) setActiveThumbByIndex(currentIndex);
   };
 }
 
@@ -173,11 +345,12 @@ function goRelative(step) {
   if (next !== currentIndex) {
     currentIndex = next;
     loadImageByIndex(currentIndex);
+    setActiveThumbByIndex(currentIndex);
   }
 }
 
 // =======================================================
-// 6) FILMSTRIP
+// 7) FILMSTRIP (con interactividad extra)
 // =======================================================
 function buildFilmstrip(images) {
   if (!stripTrack) return;
@@ -199,20 +372,83 @@ function buildFilmstrip(images) {
 
     item.appendChild(img);
     item.appendChild(label);
+    stripTrack.appendChild(item);
 
+    // click: seleccionar imagen
     item.addEventListener('click', () => {
       currentIndex = i;
       loadImageByIndex(currentIndex);
+      setActiveThumbByIndex(currentIndex);
     });
 
-    stripTrack.appendChild(item);
+    // doble click: abrir ampliación (lightbox) con cajas
+    item.addEventListener('dblclick', () => {
+      openPreview(name);
+    });
+
+    // cuando la miniatura esté lista, traemos labels y pintamos overlay
+    const ensureOverlay = async () => {
+      const labels = await fetchYoloLabels(split, name);
+      if (!labels.length) return;
+
+      const iw = img.naturalWidth || 0;
+      const ih = img.naturalHeight || 0;
+      if (!iw || !ih) return;
+
+      const boxesPx = labels.map(l => yoloToXYWH(l, iw, ih));
+      drawOverlayBoxes(item, img, boxesPx, { labelNames: getClassListArray() });
+    };
+
+    if (img.complete && img.naturalWidth) ensureOverlay();
+    else img.addEventListener('load', ensureOverlay);
   });
+
+  // Interacción “drag to scroll”
+  stripTrack.addEventListener('mousedown', (e) => {
+    fsDragging = true;
+    stripTrack.classList.add('grabbing');
+    fsStartX = e.pageX - stripTrack.offsetLeft;
+    fsScrollLeft = stripTrack.scrollLeft;
+  });
+  window.addEventListener('mouseup', () => {
+    fsDragging = false;
+    stripTrack.classList.remove('grabbing');
+  });
+  stripTrack.addEventListener('mouseleave', () => {
+    fsDragging = false;
+    stripTrack.classList.remove('grabbing');
+  });
+  stripTrack.addEventListener('mousemove', (e) => {
+    if (!fsDragging) return;
+    e.preventDefault();
+    const x = e.pageX - stripTrack.offsetLeft;
+    const walk = (x - fsStartX) * 1; // factor de arrastre
+    stripTrack.scrollLeft = fsScrollLeft - walk;
+  });
+
+  // Scroll con rueda del ratón (horizontal)
+  stripTrack.addEventListener('wheel', (e) => {
+    // Shift+rueda o rueda normal: desplaza horizontal
+    const delta = (Math.abs(e.deltaX) > Math.abs(e.deltaY)) ? e.deltaX : e.deltaY;
+    stripTrack.scrollLeft += delta;
+    // Evitamos que la página intente hacer scroll vertical
+    e.preventDefault();
+  }, { passive: false });
 
   setActiveThumbByIndex(currentIndex);
 }
 
+// Botones filmstrip: además de navegar, desplazan la tira una página aprox.
+function scrollFilmstripPage(dir = 1) {
+  if (!stripTrack) return;
+  const page = stripTrack.clientWidth * 0.9;
+  stripTrack.scrollLeft += dir * page;
+}
+stripPrev?.addEventListener('click', () => { goRelative(-1); scrollFilmstripPage(-1); });
+stripNext?.addEventListener('click', () => { goRelative(+1); scrollFilmstripPage(+1); });
+
 // =======================================================
-// 7) EVENTOS
+// 8) EVENTOS CANVAS / CONTROLES
 // =======================================================
 
 // Split cambiado
@@ -220,7 +456,7 @@ splitSelect.addEventListener('change', async () => {
   await loadImageList();
 });
 
-// Cargar (por si quieres forzar recarga de la actual)
+// Cargar (forzar recarga actual)
 loadImageBtn.addEventListener('click', () => {
   if (currentIndex >= 0) loadImageByIndex(currentIndex);
 });
@@ -235,6 +471,7 @@ tCanvas.addEventListener('mousemove', (e) => {
   }
   redrawTrain();
 });
+
 tCanvas.addEventListener('mousedown', (e) => {
   if (!tLoaded) return;
   const r = tCanvas.getBoundingClientRect();
@@ -242,25 +479,41 @@ tCanvas.addEventListener('mousedown', (e) => {
   const {ix, iy} = screenToImage(sx, sy);
   tDrawing = true; tStartX = ix; tStartY = iy; tPrevW = 0; tPrevH = 0;
 });
+
 tCanvas.addEventListener('mouseup', () => {
   if (!tDrawing) return;
   tDrawing = false;
   const w = tPrevW, h = tPrevH;
   const box = { x: w>=0 ? tStartX : tStartX+w, y: h>=0 ? tStartY : tStartY+h, w: Math.abs(w), h: Math.abs(h) };
-  if (box.w > 2 && box.h > 2) tBoxes.push(box);
+  if (box.w > 2 && box.h > 2) {
+    // adjunta la clase seleccionada al nuevo bbox
+    const clsIndex = Math.max(0, classSelect.selectedIndex);
+    box.cls = clsIndex;
+    tBoxes.push(box);
+  }
   tPrevW = tPrevH = 0;
   redrawTrain();
 });
 
-// Zoom
+// Zoom centrado en punto
 function zoomAt(factor, cx, cy) {
+  // Guardamos punto en coords de imagen ANTES del zoom
   const before = screenToImage(cx, cy);
-  tScale *= factor;
+  // Ajustamos escala
+  const newScale = tScale * factor;
+
+  // Limitar zoom
+  const minScale = 0.1, maxScale = 20;
+  tScale = Math.min(maxScale, Math.max(minScale, newScale));
+
+  // Reposicionar offsets para mantener el punto bajo el cursor
   const after = screenToImage(cx, cy);
-  tOffX += (after.ix - before.ix) * tScale;
-  tOffY += (after.iy - before.iy) * tScale;
+  tOffX += (cx - (after.ix * tScale + tOffX)) - (cx - (before.ix * (tScale/factor) + tOffX));
+  tOffY += (cy - (after.iy * tScale + tOffY)) - (cy - (before.iy * (tScale/factor) + tOffY));
+
   redrawTrain();
 }
+
 zoomInBtn.addEventListener('click', () => zoomAt(1.1, tCanvas.width/2, tCanvas.height/2));
 zoomOutBtn.addEventListener('click', () => zoomAt(1/1.1, tCanvas.width/2, tCanvas.height/2));
 resetViewBtn.addEventListener('click', () => { if (tLoaded) { fitToCanvas(); redrawTrain(); } });
@@ -331,20 +584,41 @@ window.addEventListener('keydown', (e) => {
   if (e.key === 'PageDown')   { e.preventDefault(); goRelative(+5); }
 });
 
-// Botones filmstrip
-stripPrev?.addEventListener('click', () => goRelative(-1));
-stripNext?.addEventListener('click', () => goRelative(+1));
-
 // Lightbox helpers (opcional)
 function closePreview(e) {
   e.stopPropagation();
   imgLightbox?.classList.add('hidden');
 }
+function openPreview(name){
+  const split = splitSelect.value || 'train';
+  if (!imgLightbox || !imgFull) return;
+
+  imgFull.src = buildImageUrl(split, name);
+  imgLightbox.classList.remove('hidden');
+
+  const afterLoad = async () => {
+    const labels = await fetchYoloLabels(split, name);
+    const iw = imgFull.naturalWidth || 0;
+    const ih = imgFull.naturalHeight || 0;
+    const boxesPx = (iw && ih) ? labels.map(l => yoloToXYWH(l, iw, ih)) : [];
+    // El contenedor del overlay en el lightbox es .modal-inner (padre directo)
+    const container = imgFull.closest('.modal-inner');
+    drawOverlayBoxes(container, imgFull, boxesPx, { labelNames: getClassListArray() });
+  };
+
+  if (imgFull.complete && imgFull.naturalWidth) afterLoad();
+  else imgFull.onload = afterLoad;
+}
+
+// abrir lightbox desde el canvas actual con doble click
+tCanvas.addEventListener('dblclick', () => {
+  if (currentImage) openPreview(currentImage);
+});
 
 // =======================================================
-// 8) INIT
+// 9) INIT
 // =======================================================
 window.addEventListener('DOMContentLoaded', async () => {
   await loadClasses();
-  await loadImageList();  // construye filmstrip y auto-carga una imagen
+  await loadImageList();  // construye filmstrip y auto-carga
 });
