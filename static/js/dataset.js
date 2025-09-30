@@ -75,13 +75,77 @@ async function openAll(split) {
       alert(`No se pudo abrir la carpeta: ${err.error || res.statusText}`);
       return;
     }
-    // opcional: feedback sutil
     console.log(`Carpeta de ${split} abierta en el sistema`);
   } catch (e) {
     alert(`Error de red: ${e}`);
   }
 }
 
+/* =========================
+   SUBIDA POR SPLIT
+   ========================= */
+
+// Dispara el input oculto del split
+function triggerUpload(split) {
+  const input = document.getElementById(`upload-${split}`);
+  if (!input) return;
+  input.value = ''; // reset para que pueda seleccionar lo mismo
+  input.click();
+}
+
+// Maneja el change de cada input oculto
+function attachUploadHandlers() {
+  ['train', 'valid', 'test'].forEach(split => {
+    const input = document.getElementById(`upload-${split}`);
+    if (!input) return;
+    input.addEventListener('change', async (ev) => {
+      const files = Array.from(ev.target.files || []);
+      if (!files.length) return;
+      await doUpload(split, files);
+    });
+  });
+}
+
+// Sube los ficheros al endpoint del split
+async function doUpload(split, files) {
+  const form = new FormData();
+  files.forEach(file => form.append('files[]', file));
+
+  // deshabilitar botones mientras sube
+  const panel = document.querySelector(`#grid-${split}`).closest('.panel');
+  const btns = panel.querySelectorAll('.toolbar button');
+  btns.forEach(b => b.disabled = true);
+
+  try {
+    const res = await fetch(`/dataset/upload/${split}`, {
+      method: 'POST',
+      body: form
+    });
+
+    let payload = {};
+    try { payload = await res.json(); } catch (_) {}
+
+    if (!res.ok || payload.ok === false) {
+      const msg = payload.error || res.statusText || 'Fallo subiendo archivos';
+      alert(`Error al subir a ${split}: ${msg}`);
+      return;
+    }
+
+    // Refresca conteo y grillas
+    await fetchDataset();
+
+    // Aviso corto
+    const added = payload.added ?? files.length;
+    console.log(`Subida a ${split} completada. Añadidos: ${added}`);
+  } catch (e) {
+    alert(`Error de red subiendo a ${split}: ${e}`);
+  } finally {
+    btns.forEach(b => b.disabled = false);
+  }
+}
 
 document.getElementById('refreshBtn')?.addEventListener('click', fetchDataset);
-window.addEventListener('DOMContentLoaded', fetchDataset);
+window.addEventListener('DOMContentLoaded', () => {
+  fetchDataset();
+  attachUploadHandlers();
+});

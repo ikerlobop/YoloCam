@@ -133,26 +133,41 @@
     </div>
 
     <div class="wrap">
+      <!-- TRAIN -->
       <section class="panel">
         <h3>Train <span id="count-train" class="count"></span></h3>
         <div class="toolbar">
           <button class="btn-small" onclick="openAll('train')">Abrir carpeta</button>
+          <button class="btn-small" onclick="triggerUpload('train')">Subir archivos</button>
+          <!-- input oculto para train -->
+          <input id="upload-train" type="file" multiple accept="image/*,.jpg,.jpeg,.png,.bmp,.tif,.tiff"
+                 style="display:none" />
         </div>
         <div id="grid-train" class="thumbs"></div>
       </section>
 
+      <!-- VALID -->
       <section class="panel">
         <h3>Valid <span id="count-valid" class="count"></span></h3>
         <div class="toolbar">
           <button class="btn-small" onclick="openAll('valid')">Abrir carpeta</button>
+          <button class="btn-small" onclick="triggerUpload('valid')">Subir archivos</button>
+          <!-- input oculto para valid -->
+          <input id="upload-valid" type="file" multiple accept="image/*,.jpg,.jpeg,.png,.bmp,.tif,.tiff"
+                 style="display:none" />
         </div>
         <div id="grid-valid" class="thumbs"></div>
       </section>
 
+      <!-- TEST -->
       <section class="panel">
         <h3>Test <span id="count-test" class="count"></span></h3>
         <div class="toolbar">
           <button class="btn-small" onclick="openAll('test')">Abrir carpeta</button>
+          <button class="btn-small" onclick="triggerUpload('test')">Subir archivos</button>
+          <!-- input oculto para test -->
+          <input id="upload-test" type="file" multiple accept="image/*,.jpg,.jpeg,.png,.bmp,.tif,.tiff"
+                 style="display:none" />
         </div>
         <div id="grid-test" class="thumbs"></div>
       </section>

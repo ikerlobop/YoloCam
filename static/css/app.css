@@ -430,3 +430,58 @@ body{
   display: block;
   box-sizing: border-box;
 }
+/* La vista del filmstrip ahora apila track + barra */
+.strip-view{
+  position: relative;
+  overflow: hidden;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* El track ocupa el alto disponible */
+.strip-track{ flex: 1; }
+
+/* Barra de desplazamiento inferior */
+.strip-scroll{
+  width: 100%;
+  appearance: none;
+  height: 8px;
+  background: #0c1016;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+/* Pista */
+.strip-scroll::-webkit-slider-runnable-track{
+  height: 8px;
+  background: #1c2330;
+  border-radius: 6px;
+}
+.strip-scroll::-moz-range-track{
+  height: 8px;
+  background: #1c2330;
+  border-radius: 6px;
+}
+
+/* Thumb */
+.strip-scroll::-webkit-slider-thumb{
+  appearance: none;
+  width: 14px; height: 14px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 1px solid var(--accent-700);
+  margin-top: -3px; /* centrar en la pista */
+}
+.strip-scroll::-moz-range-thumb{
+  width: 14px; height: 14px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 1px solid var(--accent-700);
+}
+
+/* Ocultar a la vista los botones, sin tocar su JS */
+#loadImageBtn, #undoBoxBtn { display: none !important; }

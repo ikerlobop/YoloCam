@@ -12,7 +12,6 @@ import sys, subprocess
 from uuid import uuid4
 from typing import List, Optional
 
-
 import psutil
 from flask import (
     Flask, jsonify, render_template,
@@ -26,6 +25,7 @@ from functools import wraps
 app = Flask(__name__, static_folder="static", template_folder="templates")
 SECRET_DEFAULT = "dev-secret-change-me"
 app.secret_key = os.environ.get("FLASK_SECRET", SECRET_DEFAULT)
+app.config['MAX_CONTENT_LENGTH'] = 512 * 1024 * 1024  # límite subida (512MB por request)
 
 # ----------------- CONFIG -----------------
 # Cámara (desactivada en esta versión)
@@ -745,6 +745,55 @@ def dataset_list():
         data[sp] = {"count": len(items), "items": items}
     return jsonify(data)
 
+# ----------------- NUEVO: UPLOAD MÚLTIPLE POR SPLIT PARA dataset.js -----------------
+@app.post("/dataset/upload/<split>")
+@login_required
+def dataset_upload(split):
+    """
+    Endpoint para subir múltiples archivos al split indicado.
+    Front: FormData con 'files[]' (o 'files').
+
+    Respuesta:
+      { ok: true, added: N, errors: [..] }
+    """
+    split = (split or "").lower()
+    if split not in ("train", "valid", "test"):
+        return jsonify(ok=False, error="split inválido"), 400
+
+    images_path = os.path.join(DATASET_ROOT, split, "images")
+    os.makedirs(images_path, exist_ok=True)
+
+    files = request.files.getlist("files[]") or request.files.getlist("files")
+    if not files:
+        return jsonify(ok=False, error="No se recibieron archivos"), 400
+
+    added = 0
+    errors = []
+
+    for storage in files:
+        fname = secure_filename(storage.filename or "")
+        if not fname:
+            errors.append("Nombre de archivo vacío")
+            continue
+        if not _allowed_ext(fname):
+            errors.append(f"Extensión no permitida: {fname}")
+            continue
+
+        # evitar overwrite
+        name, ext = os.path.splitext(fname)
+        target = os.path.join(images_path, fname)
+        if os.path.exists(target):
+            fname = f"{name}_{uuid4().hex[:8]}{ext}"
+            target = os.path.join(images_path, fname)
+
+        try:
+            storage.save(target)
+            added += 1
+        except Exception as e:
+            errors.append(f"Error guardando {fname}: {e}")
+
+    return jsonify(ok=True, added=added, errors=errors)
+
 @app.route("/dataset/open_folder/<split>", methods=["POST"])
 @login_required
 def open_folder(split):
@@ -766,7 +815,6 @@ def open_folder(split):
         return jsonify({"status": "ok"})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
 
 # ----------------- MAIN -----------------
 if __name__ == "__main__":

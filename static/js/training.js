@@ -23,6 +23,7 @@ const tCtx    = tCanvas.getContext('2d');
 const stripPrev  = document.getElementById('stripPrev');
 const stripNext  = document.getElementById('stripNext');
 const stripTrack = document.getElementById('stripTrack');
+const stripScroll = document.getElementById('stripScroll'); // NUEVO: range inferior
 
 // Lightbox (opcional)
 const imgFull     = document.getElementById('imgFull');
@@ -52,7 +53,7 @@ let fsStartX = 0;
 let fsScrollLeft = 0;
 
 // =======================================================
-/** 3) UTILS CANVAS & DIBUJO */
+// 3) UTILS CANVAS & DIBUJO
 // =======================================================
 function buildImageUrl(split, name) {
   return `/static/dataset/${split}/images/${encodeURIComponent(name)}`;
@@ -188,6 +189,7 @@ function setActiveThumbByIndex(i) {
     el.classList.toggle('active', k === i);
   });
   centerThumbInView(i);
+  updateStripScrollbar(); // mantener range sincronizado
 }
 
 // =======================================================
@@ -304,6 +306,7 @@ async function loadImageList() {
   }
 
   hud.textContent = `(${currentSplit}) ${imageListCache.length} imágenes`;
+  updateStripScrollbar(); // asegurar max/value del range tras reconstruir
 }
 
 // =======================================================
@@ -350,7 +353,7 @@ function goRelative(step) {
 }
 
 // =======================================================
-// 7) FILMSTRIP (con interactividad extra)
+// 7) FILMSTRIP (con interactividad extra + range sincronizado)
 // =======================================================
 function buildFilmstrip(images) {
   if (!stripTrack) return;
@@ -424,6 +427,7 @@ function buildFilmstrip(images) {
     const x = e.pageX - stripTrack.offsetLeft;
     const walk = (x - fsStartX) * 1; // factor de arrastre
     stripTrack.scrollLeft = fsScrollLeft - walk;
+    updateStripScrollbar();
   });
 
   // Scroll con rueda del ratón (horizontal)
@@ -431,11 +435,13 @@ function buildFilmstrip(images) {
     // Shift+rueda o rueda normal: desplaza horizontal
     const delta = (Math.abs(e.deltaX) > Math.abs(e.deltaY)) ? e.deltaX : e.deltaY;
     stripTrack.scrollLeft += delta;
+    updateStripScrollbar();
     // Evitamos que la página intente hacer scroll vertical
     e.preventDefault();
   }, { passive: false });
 
   setActiveThumbByIndex(currentIndex);
+  updateStripScrollbar();
 }
 
 // Botones filmstrip: además de navegar, desplazan la tira una página aprox.
@@ -443,9 +449,44 @@ function scrollFilmstripPage(dir = 1) {
   if (!stripTrack) return;
   const page = stripTrack.clientWidth * 0.9;
   stripTrack.scrollLeft += dir * page;
+  updateStripScrollbar();
 }
 stripPrev?.addEventListener('click', () => { goRelative(-1); scrollFilmstripPage(-1); });
 stripNext?.addEventListener('click', () => { goRelative(+1); scrollFilmstripPage(+1); });
+
+// ===== NUEVO: sincronización del range inferior =====
+function updateStripScrollbar(){
+  if (!stripTrack || !stripScroll) return;
+  const max = Math.max(0, stripTrack.scrollWidth - stripTrack.clientWidth);
+  stripScroll.max = String(Math.floor(max));
+  stripScroll.value = String(Math.floor(stripTrack.scrollLeft));
+  // Mostrar/ocultar si no hay overflow
+  stripScroll.style.visibility = max > 0 ? 'visible' : 'hidden';
+}
+
+function initStripScrollbarSync(){
+  if (!stripTrack || !stripScroll) return;
+
+  // 1) mover el scroll con el range
+  stripScroll.addEventListener('input', () => {
+    stripTrack.scrollLeft = Number(stripScroll.value || 0);
+  });
+
+  // 2) actualizar el range cuando se haga scroll (ratón/gesto/botones)
+  stripTrack.addEventListener('scroll', () => {
+    stripScroll.value = String(Math.floor(stripTrack.scrollLeft));
+  });
+
+  // 3) Recalcular límites en cambios de tamaño/contenido
+  const ro = new ResizeObserver(() => updateStripScrollbar());
+  ro.observe(stripTrack);
+
+  // fallback por si cambia el viewport
+  window.addEventListener('resize', updateStripScrollbar);
+
+  // Inicial
+  updateStripScrollbar();
+}
 
 // =======================================================
 // 8) EVENTOS CANVAS / CONTROLES
@@ -456,7 +497,7 @@ splitSelect.addEventListener('change', async () => {
   await loadImageList();
 });
 
-// Cargar (forzar recarga actual)
+// Cargar (forzar recarga actual) — botón oculto por CSS pero funcional
 loadImageBtn.addEventListener('click', () => {
   if (currentIndex >= 0) loadImageByIndex(currentIndex);
 });
@@ -525,7 +566,7 @@ tCanvas.addEventListener('wheel', (e) => {
 }, {passive:false});
 
 // Edición cajas
-undoBoxBtn.addEventListener('click', () => { tBoxes.pop(); redrawTrain(); });
+undoBoxBtn.addEventListener('click', () => { tBoxes.pop(); redrawTrain(); }); // botón oculto por CSS
 clearBoxesBtn.addEventListener('click', () => { tBoxes = []; redrawTrain(); });
 
 // Guardado
@@ -621,4 +662,5 @@ tCanvas.addEventListener('dblclick', () => {
 window.addEventListener('DOMContentLoaded', async () => {
   await loadClasses();
   await loadImageList();  // construye filmstrip y auto-carga
+  initStripScrollbarSync(); // activar sincronización range <-> scroll
 });
