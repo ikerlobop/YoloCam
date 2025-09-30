@@ -512,8 +512,6 @@ def library_delete_layer():
         return jsonify({"error": "layer requerido"}), 400
     try:
         layer = int(layer)
-        if layer <= 0:
-            return jsonify({"error": "layer debe ser un entero > 0"}), 400
     except Exception:
         return jsonify({"error": "layer inválido"}), 400
 
@@ -521,17 +519,25 @@ def library_delete_layer():
 
     files_to_delete = []
     if delete_files:
-        rows = conn.execute("SELECT path FROM captures WHERE layer=?", (layer,)).fetchall()
+        if layer == 0:
+            rows = conn.execute("SELECT path FROM captures WHERE path LIKE ?", (f"{LAYERS_ROOT_REL}/%",)).fetchall()
+        else:
+            rows = conn.execute("SELECT path FROM captures WHERE layer=?", (layer,)).fetchall()
         for (rel_path,) in rows:
             rel_norm = (rel_path or "").replace("\\", "/")
             if rel_norm.startswith(f"{LAYERS_ROOT_REL}/"):
                 files_to_delete.append(rel_norm)
 
-    cur = conn.execute("DELETE FROM captures WHERE layer=?", (layer,))
+    # Borrado en DB
+    if layer == 0:
+        cur = conn.execute("DELETE FROM captures WHERE path LIKE ?", (f"{LAYERS_ROOT_REL}/%",))
+    else:
+        cur = conn.execute("DELETE FROM captures WHERE layer=?", (layer,))
     deleted = cur.rowcount or 0
     conn.commit()
     conn.close()
 
+    # Borrado físico opcional
     files_removed = 0
     if delete_files and files_to_delete:
         for rel in files_to_delete:
@@ -549,6 +555,7 @@ def library_delete_layer():
         "deleted_db": deleted,
         "deleted_files": files_removed if delete_files else None
     })
+
 
 # ----------------- PANTALLA TRAINING -----------------
 @app.route("/training")

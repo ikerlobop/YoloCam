@@ -1,34 +1,118 @@
 <!doctype html>
-<html lang="es"><head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Iniciar sesión — ATL RDT</title>
-<style>
-  body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,Arial;background:#0a0e1a;color:#e6e8ee;display:grid;place-items:center;min-height:100vh;margin:0}
-  .card{width:min(360px,92vw);background:#121826;border:1px solid #223052;border-radius:14px;padding:20px}
-  h1{font-size:1.1rem;margin:0 0 14px}
-  label{font-size:.85rem}
-  input{width:100%;padding:10px;border-radius:10px;border:1px solid #223052;background:#0f1420;color:#fff;margin-top:6px}
-  .row{margin:10px 0}
-  .btn{width:100%;padding:12px;border:none;border-radius:10px;background:#00ff41;color:#000;font-weight:800;cursor:pointer}
-  .err{color:#ff6b6b;font-size:.9rem;margin:8px 0 0}
-  .hint{font-size:.8rem;opacity:.7;margin-top:8px}
-</style>
-</head><body>
-  <div class="card">
-    <h1>🔒 Iniciar sesión</h1>
-    <form method="post" action="/login">
-      <div class="row">
-        <label>Email</label>
-        <input name="email" type="email" placeholder="user@empresa.com" required>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Iniciar sesión — ATL RDT</title>
+
+  <!-- Usa tu CSS principal -->
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+
+  <!-- Ajustes mínimos específicos para la página de login -->
+  <style>
+    /* Centrado y fondo coherente con el resto */
+    body{
+      min-height:100vh;
+      display:grid;
+      place-items:center;
+      margin:0;
+      background:
+        radial-gradient(1200px 800px at 10% 0%, rgba(37,99,235,.10), transparent 55%),
+        radial-gradient(1000px 700px at 90% 100%, rgba(37,99,235,.08), transparent 50%),
+        linear-gradient(135deg, var(--bg-1) 0%, var(--bg-2) 45%, var(--bg-3) 100%);
+    }
+
+    /* Tarjeta consistente con paneles del app */
+    .auth-card{
+      width:min(420px, 92vw);
+      background: var(--panel-2);
+      border:1px solid var(--border);
+      border-radius:12px;
+      padding:20px;
+      box-shadow: 0 10px 30px rgba(0,0,0,.25);
+    }
+
+    .auth-title{
+      display:flex; align-items:center; gap:8px;
+      font-weight:800; font-size:1.05rem; margin:0 0 14px;
+      color:var(--text);
+    }
+
+    .auth-row{ margin:12px 0; }
+
+    .auth-label{
+      display:block; font-size:.85rem; color:var(--muted);
+      margin-bottom:6px; font-weight:700;
+    }
+
+    /* Campos compatibles con tu paleta */
+    .auth-input{
+      width:100%; padding:10px 12px;
+      border-radius:10px;
+      border:1px solid var(--border);
+      background:#0c1118;
+      color:var(--text);
+      outline:none;
+      transition: border-color .15s ease, box-shadow .15s ease;
+      font-size:.95rem;
+    }
+    .auth-input::placeholder{ color:#7c8aa5; opacity:.8; }
+    .auth-input:focus{
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(37,99,235,.2);
+    }
+
+    /* Botón: reutiliza tu estilo base, lo hacemos full-width */
+    .auth-actions .btn-small{
+      width:100%;
+      justify-content:center;
+      font-size:.95rem;
+    }
+
+    .auth-error{
+      color:#ff6b6b;
+      font-size:.9rem;
+      margin-top:10px;
+      background: rgba(255,107,107,.08);
+      border:1px solid rgba(255,107,107,.35);
+      padding:8px 10px;
+      border-radius:8px;
+    }
+
+    .auth-hint{
+      font-size:.8rem; color:var(--muted);
+      margin-top:10px; text-align:center;
+    }
+  </style>
+</head>
+<body>
+  <div class="auth-card">
+    <h1 class="auth-title">Iniciar sesión</h1>
+
+    <form method="post" action="/login" novalidate>
+      <div class="auth-row">
+        <label class="auth-label" for="email">Email</label>
+        <input id="email" name="email" type="email" class="auth-input" placeholder="user@empresa.com" required>
       </div>
-      <div class="row">
-        <label>Contraseña</label>
-        <input name="password" type="password" placeholder="••••••••" required>
+
+      <div class="auth-row">
+        <label class="auth-label" for="password">Contraseña</label>
+        <input id="password" name="password" type="password" class="auth-input" placeholder="••••••••" required>
       </div>
+
       <input type="hidden" name="next" value="{{ next_url }}">
-      <button class="btn" type="submit">Entrar</button>
-      {% if error %}<div class="err">{{ error }}</div>{% endif %}
-      <div class="hint">Demo: miguel@rdt.local / rdt1234</div>
+
+      <div class="auth-actions auth-row">
+        <!-- Botón con el estilo global (.btn-small) -->
+        <button class="btn-small" type="submit">Entrar</button>
+      </div>
+
+      {% if error %}
+      <div class="auth-error">{{ error }}</div>
+      {% endif %}
+
+      <div class="auth-hint">Demo: miguel@rdt.local / rdt1234</div>
     </form>
   </div>
-</body></html>
+</body>
+</html>

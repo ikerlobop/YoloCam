@@ -439,19 +439,23 @@ function populateLayerFilter(total) {
   const sel = document.getElementById('layerFilter');
   if (!sel) return;
   sel.innerHTML = '';
+
   const optAll = document.createElement('option');
-  optAll.value = '0';
+  optAll.value = '0';                 // <-- antes '1'
   optAll.textContent = 'Todas';
   sel.appendChild(optAll);
+
   for (let i = 1; i <= total; i++) {
     const op = document.createElement('option');
     op.value = String(i);
     op.textContent = 'Capa ' + i;
     sel.appendChild(op);
   }
+
   const lcEl = document.getElementById('layerCurrent');
   const current = lcEl ? parseInt(lcEl.textContent || '0', 10) : 0;
   if (current > 0 && current <= total) sel.value = String(current);
+  else sel.value = '0'; // por defecto, Todas
 }
 
 async function refreshLayersOnce() {
@@ -552,12 +556,9 @@ async function deleteSelectedLayer() {
   const deleteFilesChk = document.getElementById('deleteFilesChk');
   const layer = sel ? parseInt(sel.value || '0', 10) : 0;
 
-  if (!layer || layer <= 0) {
-    alert('Selecciona una capa concreta (no "Todas").');
-    return;
-  }
   const alsoFiles = !!(deleteFilesChk && deleteFilesChk.checked);
-  const sure = confirm(`¿Borrar TODAS las capturas de la capa ${layer}${alsoFiles ? ' y sus archivos' : ''}? Esta acción no se puede deshacer.`);
+  const scopeText = (layer === 0) ? 'TODAS las capas' : `la capa ${layer}`;
+  const sure = confirm(`¿Borrar ${scopeText}${alsoFiles ? ' y sus archivos' : ''}? Esta acción no se puede deshacer.`);
   if (!sure) return;
 
   if (delBtn) { delBtn.disabled = true; delBtn.textContent = '⏳ Borrando...'; }
@@ -571,17 +572,18 @@ async function deleteSelectedLayer() {
     const j = await res.json();
     if (j.status === 'ok') {
       await loadLibraryForSelectedLayer();
-      alert(`Capa ${layer} borrada. Registros eliminados: ${j.deleted_db}${alsoFiles ? ` | archivos: ${j.deleted_files}` : ''}.`);
+      alert(`${scopeText} borrada(s). Registros eliminados: ${j.deleted_db}${alsoFiles ? ` | archivos: ${j.deleted_files}` : ''}.`);
     } else {
-      alert('No se pudo borrar la capa.');
+      alert('No se pudo borrar.');
     }
   } catch (e) {
     console.error('deleteSelectedLayer error', e);
-    alert('Error al borrar la capa.');
+    alert('Error al borrar.');
   } finally {
     if (delBtn) { delBtn.disabled = false; delBtn.textContent = '🗑️ Borrar capa'; }
   }
 }
+
 
 // ======= Enganchar listeners =======
 document.addEventListener('DOMContentLoaded', () => {
