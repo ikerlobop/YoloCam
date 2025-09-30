@@ -471,7 +471,7 @@ async function refreshLayersOnce() {
 async function startCapture() {
   const startBtn = document.getElementById('startBtn');
   const resetBtn = document.getElementById('resetBtn');
-  if (startBtn) { startBtn.disabled = true; startBtn.textContent = '⏳ Iniciando...'; }
+  if (startBtn) { startBtn.disabled = true; startBtn.textContent = 'Iniciando...'; }
 
   try {
     const res = await fetch('/start_capture', { method: 'POST' });
@@ -488,7 +488,7 @@ async function startCapture() {
     }
 
     if (data.status === 'started' || data.status === 'already_running') {
-      if (startBtn) { startBtn.textContent = '✅ Captura en marcha'; }
+      if (startBtn) { startBtn.textContent = 'Captura en marcha'; }
       await bootPollingIfNeeded();
       await loadLibraryForSelectedLayer();   // refresca biblioteca por capa
     } else {
@@ -503,7 +503,7 @@ async function startCapture() {
 async function resetCapture() {
   const startBtn = document.getElementById('startBtn');
   const resetBtn = document.getElementById('resetBtn');
-  if (resetBtn) { resetBtn.disabled = true; resetBtn.textContent = '🧽 Limpiando...'; }
+  if (resetBtn) { resetBtn.disabled = true; resetBtn.textContent = 'Limpiando...'; }
 
   try {
     const res = await fetch('/reset_capture', { method: 'POST' });
@@ -514,8 +514,8 @@ async function resetCapture() {
       stopPolling();
       clearGrid();
       await loadLibraryForSelectedLayer();
-      if (startBtn) { startBtn.disabled = false; startBtn.textContent = '▶️ Arrancar'; }
-      if (resetBtn) { resetBtn.textContent = '🧹 Reset'; }
+      if (startBtn) { startBtn.disabled = false; startBtn.textContent = 'Reset'; }
+      if (resetBtn) { resetBtn.textContent = 'Reset'; }
     } else {
       if (resetBtn) { resetBtn.textContent = '❌ Error'; }
     }
@@ -818,6 +818,4 @@ saveAnnBtn?.addEventListener('click', async () => {
     alert(`Error: ${data.error || 'fallo al guardar'}`);
   }
 });
-
-
 
