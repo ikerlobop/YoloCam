@@ -60,7 +60,7 @@
           </div>
         </div>
         <div class="action-buttons">
-          <button id="startBtn" class="btn-small success">Arrancar</button>
+          <button id="startBtn" class="btn-small success">Arrancar Captura</button>
           <button id="resetBtn" class="btn-small warn">Reset</button>
           <button id="resetLayersBtn" class="btn-small warn">Reset Capas</button>
           <a class="btn-small" href="/training">Entrenamiento</a>
@@ -100,7 +100,24 @@
             </div>
           </div>
         </div>
-      </div>
+        <!-- Lámina de capa (live + final) -->
+        <div class="grid-wrap" style="margin-top:18px;">
+          <div class="gridTitle">Lámina de capa (en directo)</div>
+        
+          <!-- Canvas en vivo mientras se capturan slots -->
+          <canvas id="layerSheetCanvas" width="1600" height="480"
+            style="width:100%;max-width:100%;height:auto;border:1px solid var(--border);border-radius:12px;"></canvas>
+        
+          <!-- Imagen final generada por el servidor (se muestra cuando exista) -->
+          <img id="layerSheetFinal" class="hidden" alt="Lámina unificada de capa"
+            style="width:100%;max-width:100%;border:1px solid var(--border);border-radius:12px;display:block;margin-top:8px;" />
+        
+          <div id="layerSheetStatus" style="font-size:12px;opacity:.7;margin-top:6px;"></div>
+        </div>
+          <div style="margin-top:10px;display:flex;gap:12px;align-items:center;">
+            <button id="deleteSheetBtn" class="btn-small warn">Borrar lámina capa</button>
+          </div>
+        </div>
     </div>
 
         <!-- ===== PANE ENTRENAMIENTO (oculto por defecto) ===== -->

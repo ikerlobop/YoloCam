@@ -56,6 +56,12 @@ LAYERS_ROOT_REL = os.path.join("layers")                 # relativo a /static
 LAYERS_ROOT_ABS = os.path.join(app.static_folder, LAYERS_ROOT_REL)
 os.makedirs(LAYERS_ROOT_ABS, exist_ok=True)
 
+# Carpeta resumen por capa (lámina + copia de imágenes)
+IMAGEN_CAPA_ROOT_REL = os.path.join("imagen_capa")          # relativo a /static
+IMAGEN_CAPA_ROOT_ABS = os.path.join(app.static_folder, IMAGEN_CAPA_ROOT_REL)
+os.makedirs(IMAGEN_CAPA_ROOT_ABS, exist_ok=True)
+
+
 # ----------------- ESTADO -----------------
 state = {
     "images": [],       # rutas RELATIVAS a /static (ej: 'dataset/valid/images/xxx.jpg')
@@ -323,9 +329,110 @@ def save_capture(path_rel_src: str, layer: int, split: str):
     conn.commit()
     conn.close()
 
+
+def bundle_layer_assets(layer: int, grid_cols: int = 5, grid_rows: int = 2, gutter: int = 0):
+    """
+    Copia las imágenes de static/layers/layer_<layer>/ a
+    static/imagen_capa/layer_<layer>/images/
+    y genera una lámina (contact sheet) sin bandas negras (modo COVER) en:
+    static/imagen_capa/layer_<layer>/layer_<layer>.jpg
+    """
+    try:
+        from PIL import Image, ImageOps
+    except Exception as e:
+        print(f"[WARN] Pillow no disponible; omito lámina unificada: {e}")
+        return
+
+    # Compat Resampling (Pillow>=9.1) o filtro LANCZOS antiguo
+    try:
+        RESAMPLE_LANCZOS = Image.Resampling.LANCZOS  # type: ignore[attr-defined]
+    except Exception:
+        RESAMPLE_LANCZOS = Image.LANCZOS
+
+    # 1) Obtener lista ordenada por tiempo de las COPIAS en layers/ para esta capa
+    conn = get_db()
+    db_rows = conn.execute(
+        "SELECT path FROM captures WHERE layer=? AND path LIKE ? ORDER BY ts ASC",
+        (int(layer), f"{LAYERS_ROOT_REL}/%")
+    ).fetchall()
+    conn.close()
+
+    rel_paths = [(r[0] or "").replace("\\", "/") for r in db_rows]
+    if not rel_paths:
+        print(f"[INFO] Sin imágenes para layer {layer}, no genero lámina")
+        return
+
+    # 2) Preparar destino
+    layer_dir_rel = os.path.join(IMAGEN_CAPA_ROOT_REL, f"layer_{int(layer)}").replace("\\", "/")
+    layer_dir_abs = os.path.join(app.static_folder, layer_dir_rel)
+    images_dst_abs = os.path.join(layer_dir_abs, "images")
+    os.makedirs(images_dst_abs, exist_ok=True)
+
+    # 3) Copiar imágenes a imagen_capa/layer_<N>/images/
+    abs_list = []
+    for rel in rel_paths:
+        src_abs = os.path.join(app.static_folder, rel)
+        if not os.path.isfile(src_abs):
+            continue
+        fname = os.path.basename(src_abs)
+        dst_abs = os.path.join(images_dst_abs, fname)
+        try:
+            if not os.path.isfile(dst_abs):
+                shutil.copy2(src_abs, dst_abs)
+            abs_list.append(dst_abs)
+        except Exception as e:
+            print(f"[WARN] No se pudo copiar {src_abs} -> {dst_abs}: {e}")
+
+    if not abs_list:
+        print(f"[INFO] No hay archivos válidos que copiar en layer {layer}")
+        return
+
+    # 4) Parámetros de lámina (2x5 por defecto) y tamaño de tile
+    cols = int(grid_cols)
+    n_rows = int(grid_rows)
+    abs_list = abs_list[: cols * n_rows]  # máximo visibles
+
+    tile_w, tile_h = 320, 240  # relación 4:3. Ajusta si quieres más grande/pequeño
+
+    # 5) Lienzo final sin gaps (gutter=0 por defecto)
+    sheet_w = cols * tile_w + (cols - 1) * gutter
+    sheet_h = n_rows * tile_h + (n_rows - 1) * gutter
+    sheet = Image.new("RGB", (sheet_w, sheet_h), (0, 0, 0))
+
+    # 6) Generar thumbnails en modo COVER (sin bandas; se recorta lo que sobre)
+    idx = 0
+    for path in abs_list:
+        try:
+            with Image.open(path) as im:
+                im = im.convert("RGB")
+                th = ImageOps.fit(im, (tile_w, tile_h), method=RESAMPLE_LANCZOS, centering=(0.5, 0.5))
+        except Exception as e:
+            print(f"[WARN] No se pudo preparar thumbnail {path}: {e}")
+            continue
+
+        r = idx // cols
+        c = idx % cols
+        x = c * (tile_w + gutter)
+        y = r * (tile_h + gutter)
+        sheet.paste(th, (x, y))
+        idx += 1
+
+    # 7) Guardar lámina
+    out_abs = os.path.join(layer_dir_abs, f"layer_{int(layer)}.jpg")
+    try:
+        sheet.save(out_abs, quality=92)
+        print(f"[OK] Lámina unificada (cover) creada: {out_abs}")
+    except Exception as e:
+        print(f"[WARN] No se pudo guardar lámina layer {layer}: {e}")
+
+
 # ----------------- CAPTURA (SELECCIÓN ALEATORIA) -----------------
 def capture_loop():
     try:
+        # fijar id de capa para toda la captura (evita carreras)
+        with lock:
+            layer_id = state["layer_current"]
+
         pool_remaining = build_pool(SPLIT_MODE)
         if not pool_remaining:
             raise RuntimeError(
@@ -338,13 +445,23 @@ def capture_loop():
                 if len(state["images"]) >= TOTAL_SLOTS:
                     state["running"] = False
                     state["stopped"] = True
-                    break
+            # fuera del lock: comprobamos y empaquetamos
+            if len(state["images"]) >= TOTAL_SLOTS:
+                try:
+                    bundle_layer_assets(layer_id)
+                except Exception as e:
+                    print(f"[WARN] bundle layer {layer_id}: {e}")
+                break
 
             if not pool_remaining:
                 with lock:
                     state["running"] = False
                     state["stopped"] = True
                     state["error"] = "No quedan imágenes disponibles."
+                try:
+                    bundle_layer_assets(layer_id)
+                except Exception as e:
+                    print(f"[WARN] bundle layer {layer_id}: {e}")
                 break
 
             chosen = pool_remaining.pop(0)  # ruta relativa al dataset (para el grid)
@@ -366,6 +483,71 @@ def capture_loop():
             state["error"] = str(e)
             state["running"] = False
             state["stopped"] = True
+        try:
+            bundle_layer_assets(layer_id)
+        except Exception as e2:
+            print(f"[WARN] bundle (on error) layer {layer_id}: {e2}")
+def capture_loop():
+    try:
+        # fijar id de capa para toda la captura (evita carreras)
+        with lock:
+            layer_id = state["layer_current"]
+
+        pool_remaining = build_pool(SPLIT_MODE)
+        if not pool_remaining:
+            raise RuntimeError(
+                f"No hay imágenes válidas en '{SPLIT_MODE}'. Revisa static/dataset/<split>/images"
+            )
+
+        slot_idx = 0
+        while slot_idx < TOTAL_SLOTS:
+            with lock:
+                if len(state["images"]) >= TOTAL_SLOTS:
+                    state["running"] = False
+                    state["stopped"] = True
+            # fuera del lock: comprobamos y empaquetamos
+            if len(state["images"]) >= TOTAL_SLOTS:
+                try:
+                    bundle_layer_assets(layer_id)
+                except Exception as e:
+                    print(f"[WARN] bundle layer {layer_id}: {e}")
+                break
+
+            if not pool_remaining:
+                with lock:
+                    state["running"] = False
+                    state["stopped"] = True
+                    state["error"] = "No quedan imágenes disponibles."
+                try:
+                    bundle_layer_assets(layer_id)
+                except Exception as e:
+                    print(f"[WARN] bundle layer {layer_id}: {e}")
+                break
+
+            chosen = pool_remaining.pop(0)  # ruta relativa al dataset (para el grid)
+            with lock:
+                state["images"].append(chosen)
+                current_layer = state["layer_current"]
+                slot_idx += 1
+                print(f"[DEBUG] Slot {slot_idx} cargado con {chosen}")
+
+            try:
+                save_capture(chosen, current_layer, SPLIT_MODE)
+            except Exception as e:
+                print(f"[WARN] No se pudo guardar la captura en DB: {e}")
+
+            time.sleep(CYCLE_SECONDS)
+
+    except Exception as e:
+        with lock:
+            state["error"] = str(e)
+            state["running"] = False
+            state["stopped"] = True
+        try:
+            bundle_layer_assets(layer_id)
+        except Exception as e2:
+            print(f"[WARN] bundle (on error) layer {layer_id}: {e2}")
+
 
 def ensure_thread():
     with lock:
@@ -554,6 +736,49 @@ def library_delete_layer():
         "layer": layer,
         "deleted_db": deleted,
         "deleted_files": files_removed if delete_files else None
+    })
+
+@app.route("/imagen_capa/delete_layer", methods=["POST"])
+@login_required
+def delete_layer_sheet():
+    data = request.get_json(silent=True) or {}
+    layer = data.get("layer", None)
+    if layer is None:
+        return jsonify({"error": "layer requerido"}), 400
+
+    try:
+        layer = int(layer)
+    except Exception:
+        return jsonify({"error": "layer inválido"}), 400
+
+    layer_dir_rel = os.path.join(IMAGEN_CAPA_ROOT_REL, f"layer_{layer}")
+    layer_dir_abs = os.path.join(app.static_folder, layer_dir_rel)
+
+    removed_files, removed_dirs = 0, 0
+    if os.path.isdir(layer_dir_abs):
+        for root, dirs, files in os.walk(layer_dir_abs, topdown=False):
+            for f in files:
+                try:
+                    os.remove(os.path.join(root, f))
+                    removed_files += 1
+                except Exception as e:
+                    print(f"[WARN] No se pudo borrar {f}: {e}")
+            for d in dirs:
+                try:
+                    os.rmdir(os.path.join(root, d))
+                    removed_dirs += 1
+                except Exception as e:
+                    print(f"[WARN] No se pudo borrar dir {d}: {e}")
+        try:
+            os.rmdir(layer_dir_abs)
+        except Exception:
+            pass
+
+    return jsonify({
+        "status": "ok",
+        "layer": layer,
+        "deleted_files": removed_files,
+        "deleted_dirs": removed_dirs
     })
 
 
@@ -836,4 +1061,4 @@ if __name__ == "__main__":
         password="rdt1234"  # ⚠️ cambia en prod
     )
 
-    app.run(host="127.0.0.1", port=5000, debug=False)
+    app.run(host="127.0.0.1", port=5000, debug=True)

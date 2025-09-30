@@ -492,7 +492,7 @@ async function startCapture() {
     }
 
     if (data.status === 'started' || data.status === 'already_running') {
-      if (startBtn) { startBtn.textContent = 'Captura en marcha'; }
+      if (startBtn) { startBtn.textContent = 'Arrancar Captura'; }
       await bootPollingIfNeeded();
       await loadLibraryForSelectedLayer();   // refresca biblioteca por capa
     } else {
@@ -518,7 +518,7 @@ async function resetCapture() {
       stopPolling();
       clearGrid();
       await loadLibraryForSelectedLayer();
-      if (startBtn) { startBtn.disabled = false; startBtn.textContent = 'Reset'; }
+      if (startBtn) { startBtn.disabled = false; startBtn.textContent = 'Arrancar Captura'; }
       if (resetBtn) { resetBtn.textContent = 'Reset'; }
     } else {
       if (resetBtn) { resetBtn.textContent = '❌ Error'; }
@@ -821,3 +821,188 @@ saveAnnBtn?.addEventListener('click', async () => {
   }
 });
 
+// ==============================
+// Lámina en directo (front-only)
+// ==============================
+const SHEET_COLS = 5;
+const SHEET_ROWS = 2;
+const TILE_W     = 320; // mantener igual que servidor (ImageOps.fit 320x240)
+const TILE_H     = 240;
+
+const sheetCanvas = document.getElementById('layerSheetCanvas');
+const sheetCtx    = sheetCanvas?.getContext('2d');
+const sheetFinal  = document.getElementById('layerSheetFinal');
+const sheetStatus = document.getElementById('layerSheetStatus');
+
+let sheetLayerId  = 0;
+let sheetTimer    = null;
+
+// Ajusta tamaño lógico del canvas al layout (mantener múltiplos de TILE)
+function resizeSheetCanvas() {
+  if (!sheetCanvas) return;
+  // ancho visual del contenedor
+  const wrap = sheetCanvas.parentElement;
+  const viewW = wrap ? wrap.clientWidth : 1600;
+  // mantener aspecto (cols*tile_w : rows*tile_h)
+  const targetW = Math.min(1600, Math.max(800, viewW)); // límites razonables
+  const targetH = Math.round(targetW * (SHEET_ROWS*TILE_H) / (SHEET_COLS*TILE_W));
+
+  sheetCanvas.width  = SHEET_COLS * TILE_W;
+  sheetCanvas.height = SHEET_ROWS * TILE_H;
+  // usamos CSS para escalar suavemente
+  sheetCanvas.style.width  = `${targetW}px`;
+  sheetCanvas.style.height = `${targetH}px`;
+}
+
+// Dibuja una imagen "cover" dentro del tile (sin bandas)
+function drawCover(ctx, img, dx, dy, tw, th) {
+  const iw = img.naturalWidth  || img.width;
+  const ih = img.naturalHeight || img.height;
+  if (!iw || !ih) return;
+
+  const scale = Math.max(tw / iw, th / ih);
+  const dw = iw * scale;
+  const dh = ih * scale;
+  const sx = Math.floor((dw - tw) / 2);
+  const sy = Math.floor((dh - th) / 2);
+
+  // Para evitar artefactos, dibujamos en offscreen si es necesario, pero aquí basta:
+  // drawImage(img, sx/scale, sy/scale, tw/scale, th/scale, dx, dy, tw, th)
+  ctx.drawImage(
+    img,
+    sx / scale, sy / scale,
+    tw / scale, th / scale,
+    dx, dy, tw, th
+  );
+}
+
+// Construye la URL de la imagen del grid (ya vienen completas en /state, pero por si acaso)
+function toAbsUrl(u){ return u; }
+
+// Renderiza N imágenes del grid al canvas (en directo)
+async function drawLiveSheet(imagesAbs) {
+  if (!sheetCtx || !sheetCanvas) return;
+  sheetCtx.fillStyle = '#000';
+  sheetCtx.fillRect(0, 0, sheetCanvas.width, sheetCanvas.height);
+
+  const maxTiles = SHEET_COLS * SHEET_ROWS;
+  const list = imagesAbs.slice(0, maxTiles);
+
+  // Cargamos todas en paralelo
+  const imgs = await Promise.all(list.map(src => new Promise(res => {
+    const im = new Image();
+    im.crossOrigin = 'anonymous';
+    im.onload = () => res(im);
+    im.onerror = () => res(null);
+    im.src = toAbsUrl(src);
+  })));
+
+  // Pintamos en cuadrícula COVER
+  let idx = 0;
+  for (const im of imgs) {
+    const r = Math.floor(idx / SHEET_COLS);
+    const c = idx % SHEET_COLS;
+    const dx = c * TILE_W;
+    const dy = r * TILE_H;
+
+    if (im) drawCover(sheetCtx, im, dx, dy, TILE_W, TILE_H);
+    else {
+      // celda vacía
+      sheetCtx.fillStyle = '#111';
+      sheetCtx.fillRect(dx, dy, TILE_W, TILE_H);
+    }
+    idx++;
+  }
+
+  // HUD sutil
+  if (sheetStatus) {
+    sheetStatus.textContent = `Lámina en directo — capa ${sheetLayerId} · slots ${list.length}/${SHEET_COLS*SHEET_ROWS}`;
+  }
+}
+
+// Comprueba si ya existe la lámina final del servidor para la capa actual
+async function checkFinalSheet(layerId) {
+  const url = `/static/imagen_capa/layer_${layerId}/layer_${layerId}.jpg?cb=${Date.now()}`;
+  try {
+    const r = await fetch(url, { method: 'HEAD', cache: 'no-store' });
+    return r.ok ? url : null;
+  } catch {
+    return null;
+  }
+}
+
+// Bucle de actualización: lee /layers, /state y decide qué mostrar
+async function tickLayerSheet() {
+  try {
+    // 1) Capa actual
+    const lr = await fetch('/layers', { cache: 'no-store' });
+    const ldata = await lr.json();
+    sheetLayerId = ldata.current || 0;
+
+    // 2) ¿Existe lámina final?
+    const finalUrl = await checkFinalSheet(sheetLayerId);
+
+    if (finalUrl) {
+      // Mostrar imagen final y ocultar canvas live
+      if (sheetFinal) {
+        sheetFinal.src = finalUrl;
+        sheetFinal.classList.remove('hidden');
+      }
+      if (sheetCanvas) sheetCanvas.classList.add('hidden');
+      if (sheetStatus) sheetStatus.textContent = `Lámina final generada — capa ${sheetLayerId}`;
+      return;
+    }
+
+    // 3) No existe final: pintar live desde el grid actual (/state.images)
+    const sr = await fetch('/state', { cache: 'no-store' });
+    const sdata = await sr.json();
+    const images = Array.isArray(sdata.images) ? sdata.images : [];
+
+    if (sheetFinal) sheetFinal.classList.add('hidden');
+    if (sheetCanvas) sheetCanvas.classList.remove('hidden');
+
+        await drawLiveSheet(images);
+
+  } catch (e) {
+    console.warn('tickLayerSheet error:', e);
+    if (sheetStatus) sheetStatus.textContent = 'Lámina: error al actualizar';
+  }
+}
+
+// Init
+window.addEventListener('DOMContentLoaded', () => {
+  resizeSheetCanvas();
+  window.addEventListener('resize', resizeSheetCanvas);
+  // refresco suave: 1s. Puedes subir/bajar.
+  sheetTimer = setInterval(tickLayerSheet, 1000);
+  tickLayerSheet();
+});
+const deleteSheetBtn = document.getElementById('deleteSheetBtn');
+deleteSheetBtn?.addEventListener('click', async () => {
+  if (!sheetLayerId) { alert("No hay capa activa."); return; }
+  if (!confirm(`¿Borrar lámina e imágenes de capa_${sheetLayerId}?`)) return;
+
+  try {
+    const resp = await fetch('/imagen_capa/delete_layer', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ layer: sheetLayerId })
+    });
+    const data = await resp.json();
+    if (resp.ok) {
+      alert(`Lámina de capa ${sheetLayerId} borrada (${data.deleted_files} ficheros).`);
+      // Reset visual
+      if (sheetFinal) sheetFinal.classList.add('hidden');
+      if (sheetCanvas) {
+        sheetCtx.clearRect(0,0,sheetCanvas.width,sheetCanvas.height);
+        sheetCanvas.classList.remove('hidden');
+      }
+      if (sheetStatus) sheetStatus.textContent = "Lámina borrada.";
+    } else {
+      alert("Error: " + (data.error || "fallo en borrado"));
+    }
+  } catch (e) {
+    console.error(e);
+    alert("Error de red al borrar lámina.");
+  }
+});
