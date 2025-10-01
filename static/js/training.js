@@ -20,14 +20,17 @@ const tCanvas = document.getElementById('trainCanvas');
 const tCtx    = tCanvas.getContext('2d');
 
 // Filmstrip
-const stripPrev  = document.getElementById('stripPrev');
-const stripNext  = document.getElementById('stripNext');
-const stripTrack = document.getElementById('stripTrack');
-const stripScroll = document.getElementById('stripScroll'); // NUEVO: range inferior
+const stripPrev   = document.getElementById('stripPrev');
+const stripNext   = document.getElementById('stripNext');
+const stripTrack  = document.getElementById('stripTrack');
+const stripScroll = document.getElementById('stripScroll');
 
-// Lightbox (opcional)
+// Lightbox
 const imgFull     = document.getElementById('imgFull');
 const imgLightbox = document.getElementById('imgLightbox');
+
+// Desactivar menú contextual para permitir pan con botón derecho
+tCanvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
 // =======================================================
 // 2) ESTADO
@@ -52,6 +55,14 @@ let fsDragging = false;
 let fsStartX = 0;
 let fsScrollLeft = 0;
 
+// Estado de pan (arrastre de la imagen al hacer zoom)
+let panning = false;
+let panStart = { x:0, y:0 };
+let panOffStart = { x:0, y:0 };
+
+let DPR = 1;
+
+
 // =======================================================
 // 3) UTILS CANVAS & DIBUJO
 // =======================================================
@@ -59,8 +70,22 @@ function buildImageUrl(split, name) {
   return `/static/dataset/${split}/images/${encodeURIComponent(name)}`;
 }
 
+// Ajusta el canvas a su tamaño en CSS y al devicePixelRatio
+function syncCanvasDPI() {
+  DPR = window.devicePixelRatio || 1;
+  const rect = tCanvas.getBoundingClientRect();
+  const w = Math.max(1, Math.round(rect.width  * DPR));
+  const h = Math.max(1, Math.round(rect.height * DPR));
+  if (tCanvas.width !== w || tCanvas.height !== h) {
+    tCanvas.width  = w;
+    tCanvas.height = h;
+  }
+}
+
 function fitToCanvas() {
-  const iw = tImg.width, ih = tImg.height;
+  const iw = tImg.naturalWidth  || tImg.width;
+  const ih = tImg.naturalHeight || tImg.height;
+  syncCanvasDPI();
   const cw = tCanvas.width, ch = tCanvas.height;
   tScale = Math.min(cw/iw, ch/ih);
   tOffX  = (cw - iw * tScale) / 2;
@@ -70,103 +95,139 @@ function fitToCanvas() {
 function screenToImage(px, py) {
   return { ix: (px - tOffX) / tScale, iy: (py - tOffY) / tScale };
 }
+function imageToScreen(ix, iy) {
+  return { sx: ix * tScale + tOffX, sy: iy * tScale + tOffY };
+}
+
+// Recorta a los límites de la imagen cargada
+function clampToImage(ix, iy) {
+  const iw = tImg?.naturalWidth  || 0;
+  const ih = tImg?.naturalHeight || 0;
+  return {
+    ix: Math.min(Math.max(ix, 0), iw),
+    iy: Math.min(Math.max(iy, 0), ih)
+  };
+}
 
 function drawCrosshair(x, y) {
+  const extra = 0; // pon 50 si quieres prolongar derecha/abajo 50px
+  tCtx.save();
   tCtx.strokeStyle = 'lime';
   tCtx.lineWidth   = 1;
+
   tCtx.beginPath();
-  tCtx.moveTo(x - 10, y); tCtx.lineTo(x + 10, y);
-  tCtx.moveTo(x, y - 10); tCtx.lineTo(x, y + 10);
+  // Horizontal: de 0 hasta ancho canvas (+extra si quieres)
+  tCtx.moveTo(0, y);
+  tCtx.lineTo(tCanvas.width + extra, y);
+
+  // Vertical: de 0 hasta alto canvas (+extra si quieres)
+  tCtx.moveTo(x, 0);
+  tCtx.lineTo(x, tCanvas.height + extra);
+
   tCtx.stroke();
+  tCtx.restore();
 }
+
 
 // Obtener array de nombres de clase (index -> nombre)
 function getClassListArray(){
   return Array.from(classSelect?.options || []).map(o=>o.value);
 }
 
-// Dibuja una etiqueta con fondo sobre el canvas principal, escalada
-function drawCanvasLabel(imgX, imgY, text) {
-  // convertir a coordenadas de pantalla
-  const sx = imgX * tScale + tOffX;
-  const sy = imgY * tScale + tOffY;
+// Dibuja el texto centrado encima del bbox (usa coords de imagen -> pantalla)
+function drawCanvasLabelOnTop(b, text) {
+  const cxImg = b.x + b.w / 2;  // centro horizontal de la caja
+  const topImg = b.y;           // borde superior de la caja
+  drawCanvasLabel(cxImg, topImg, text, { align: 'center', margin: 4 });
+}
 
-  // tamaño de fuente relativo al zoom (legible a cualquier escala)
-  const base = 12;                   // px a escala 1:1
+// Dibuja una etiqueta en pantalla a partir de coords de imagen
+function drawCanvasLabel(imgX, imgY, text, { align='left', margin=4 } = {}) {
+  // Convertimos a coords de pantalla (px de canvas, ya corregidos por DPR)
+  const { sx, sy } = imageToScreen(imgX, imgY);
+
+  // Tipografía estable con zoom
+  const base = 12;
   const fontPx = Math.max(10, base / tScale);
+  tCtx.save();
+  tCtx.setTransform(1,0,0,1,0,0); // aseguramos NO hay transformaciones activas
   tCtx.font = `${fontPx}px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`;
 
-  const paddingX = 4 / tScale;
-  const paddingY = 2 / tScale;
-
+  const padX = 4 / tScale;
+  const padY = 2 / tScale;
   const metrics = tCtx.measureText(text);
   const textW = metrics.width;
-  const textH = fontPx; // aprox
+  const textH = fontPx;
 
-  // fondo
-  tCtx.save();
-  tCtx.fillStyle = 'rgba(0,0,0,0.6)';
+  const boxW = textW + padX * 2;
+  const boxH = textH + padY * 2;
+
+  // Posición de la caja del label (encima del bbox, con margen)
+  let boxX = sx;
+  if (align === 'center') boxX = sx - boxW / 2;
+  const boxY = sy - boxH - (margin / tScale);
+
+  // Fondo + borde
+  tCtx.fillStyle = 'rgba(0,0,0,0.7)';
   tCtx.strokeStyle = 'rgba(255,255,255,0.85)';
-  tCtx.lineWidth = 1 / tScale;
-
-  const boxX = sx;
-  const boxY = sy - (textH + 6 / tScale); // por encima del bbox
-  const boxW = textW + paddingX * 2;
-  const boxH = textH + paddingY * 2;
-
-  // Fondo rectangular
+  tCtx.lineWidth = 1; // ya estamos en espacio pantalla
   tCtx.beginPath();
   tCtx.rect(boxX, boxY, boxW, boxH);
   tCtx.fill();
   tCtx.stroke();
 
-  // texto
-  tCtx.fillStyle = '#ffffff';
-  tCtx.fillText(text, boxX + paddingX, boxY + paddingY + textH * 0.8);
+  // Texto
+  tCtx.fillStyle = '#fff';
+  tCtx.fillText(text, boxX + padX, boxY + padY + textH * 0.8);
   tCtx.restore();
 }
 
+
 function redrawTrain() {
+  syncCanvasDPI();
   tCtx.clearRect(0,0,tCanvas.width,tCanvas.height);
+
   if (!tLoaded) {
     hud.textContent = `(${currentSplit}) listo`;
     return;
   }
 
+  // 1) IMAGEN + CAJAS (en espacio de imagen)
   tCtx.save();
   tCtx.translate(tOffX, tOffY);
   tCtx.scale(tScale, tScale);
+
   tCtx.drawImage(tImg, 0, 0);
 
-  // BBoxes
   tCtx.lineWidth = 2 / tScale;
-  const labelNames = getClassListArray();
-  tBoxes.forEach(b => {
-    // caja
-    tCtx.strokeStyle = '#ff3b30';
+  tCtx.strokeStyle = '#ff3b30';
+  for (const b of tBoxes) {
     tCtx.strokeRect(b.x, b.y, b.w, b.h);
+  }
 
-    // etiqueta clase (encima de la caja)
-    const clsName = labelNames?.[b.cls] ?? String(b.cls ?? '');
-    if (clsName) {
-      // punto superior-izquierdo en coord. imagen
-      drawCanvasLabel(b.x, b.y, clsName);
-    }
-  });
-
-  // si estamos dibujando, caja "preview"
+  // caja provisional mientras dibujas
   if (tDrawing) {
     tCtx.strokeStyle = 'lime';
     tCtx.strokeRect(tStartX, tStartY, tPrevW, tPrevH);
   }
 
   tCtx.restore();
+
+  // 2) LABELS (en espacio de pantalla, sin transformaciones)
+  const labelNames = getClassListArray();
+  for (const b of tBoxes) {
+    const clsName = labelNames?.[b.cls] ?? String(b.cls ?? '');
+    if (clsName) drawCanvasLabelOnTop(b, clsName);
+  }
+
+  // 3) CROSSHAIR (pantalla)
   drawCrosshair(tMouseX, tMouseY);
 
   hud.textContent = currentImage
     ? `img: ${currentImage} | zoom ${(tScale*100).toFixed(0)}% | cajas ${tBoxes.length}`
     : `(${currentSplit}) listo`;
 }
+
 
 // Centrar una miniatura en la vista del filmstrip
 function centerThumbInView(i) {
@@ -196,7 +257,6 @@ function setActiveThumbByIndex(i) {
 // 4) YOLO utils + overlay helpers
 // =======================================================
 function buildLabelUrl(split, name){
-  // mismo nombre pero .txt en /labels
   const base = name.replace(/\.[^.]+$/, '');
   return `/static/dataset/${split}/labels/${encodeURIComponent(base)}.txt`;
 }
@@ -225,7 +285,6 @@ function yoloToXYWH(label, iw, ih){
 
 // ====== Overlays HTML (filmstrip y lightbox) ======
 function drawOverlayBoxes(container, img, boxesPx, {labelNames=[]}={}){
-  // elimina overlay anterior
   let overlay = container.querySelector('.bbox-layer');
   if(!overlay){
     overlay = document.createElement('div');
@@ -234,7 +293,6 @@ function drawOverlayBoxes(container, img, boxesPx, {labelNames=[]}={}){
   }
   overlay.innerHTML = '';
 
-  // medimos cómo la imagen "encaja" (contain) dentro del contenedor
   const cw = container.clientWidth, ch = container.clientHeight;
   const iw = img.naturalWidth, ih = img.naturalHeight;
   const scale = Math.min(cw/iw, ch/ih);
@@ -242,7 +300,6 @@ function drawOverlayBoxes(container, img, boxesPx, {labelNames=[]}={}){
   const offX = (cw - dispW) / 2;
   const offY = (ch - dispH) / 2;
 
-  // posicionamos overlay para que coincida con el área visible de la imagen
   overlay.style.left = offX + 'px';
   overlay.style.top  = offY + 'px';
   overlay.style.width  = dispW + 'px';
@@ -261,7 +318,6 @@ function drawOverlayBoxes(container, img, boxesPx, {labelNames=[]}={}){
     node.style.width  = `${bw}px`;
     node.style.height = `${bh}px`;
 
-    // etiqueta (opcional)
     const lbl = document.createElement('div');
     lbl.className = 'bbox-label';
     const clsName = (labelNames[b.cls] ?? String(b.cls));
@@ -270,6 +326,49 @@ function drawOverlayBoxes(container, img, boxesPx, {labelNames=[]}={}){
 
     overlay.appendChild(node);
   });
+}
+
+// Refresca solo la miniatura indicada (sin reconstruir toda la tira)
+async function refreshThumbOverlay(name, split = currentSplit) {
+  if (!stripTrack) return;
+  const el = stripTrack.querySelector(`.strip-thumb[data-name="${name}"]`);
+  if (!el) return;
+
+  const img = el.querySelector('img');
+  if (!img) return;
+
+  if (!img.complete || !img.naturalWidth) {
+    await new Promise(resolve => {
+      img.onload = resolve;
+      img.onerror = resolve;
+    });
+  }
+
+  const labels = await fetchYoloLabels(split, name);
+  const overlay = el.querySelector('.bbox-layer');
+  if (!labels.length || !img.naturalWidth || !img.naturalHeight) {
+    if (overlay) overlay.innerHTML = '';
+    return;
+  }
+
+  const iw = img.naturalWidth;
+  const ih = img.naturalHeight;
+  const boxesPx = labels.map(l => yoloToXYWH(l, iw, ih));
+  drawOverlayBoxes(el, img, boxesPx, { labelNames: getClassListArray() });
+}
+
+// Refresca el overlay del lightbox si está abierto
+async function refreshLightboxOverlay() {
+  if (!imgLightbox || !imgFull) return;
+  const isOpen = !imgLightbox.classList.contains('hidden');
+  if (!isOpen || !currentImage) return;
+
+  const labels = await fetchYoloLabels(currentSplit, currentImage);
+  const iw = imgFull.naturalWidth || 0;
+  const ih = imgFull.naturalHeight || 0;
+  const boxesPx = (iw && ih) ? labels.map(l => yoloToXYWH(l, iw, ih)) : [];
+  const container = imgFull.closest('.modal-inner');
+  drawOverlayBoxes(container, imgFull, boxesPx, { labelNames: getClassListArray() });
 }
 
 // =======================================================
@@ -281,7 +380,8 @@ async function loadClasses() {
   classSelect.innerHTML = '';
   (data.classes || []).forEach((c, i) => {
     const opt = document.createElement('option');
-    opt.value = c; opt.textContent = `${i} — ${c}`;
+    opt.value = c;
+    opt.textContent = `${i} — ${c}`;
     classSelect.appendChild(opt);
   });
 }
@@ -297,7 +397,7 @@ async function loadImageList() {
   if (imageListCache.length > 0) {
     currentIndex = Math.max(0, Math.min(currentIndex, imageListCache.length - 1));
     if (currentIndex < 0) currentIndex = 0;
-    loadImageByIndex(currentIndex); // carga la actual/primera
+    loadImageByIndex(currentIndex);
     setActiveThumbByIndex(currentIndex);
   } else {
     currentIndex = -1;
@@ -306,7 +406,7 @@ async function loadImageList() {
   }
 
   hud.textContent = `(${currentSplit}) ${imageListCache.length} imágenes`;
-  updateStripScrollbar(); // asegurar max/value del range tras reconstruir
+  updateStripScrollbar();
 }
 
 // =======================================================
@@ -320,16 +420,14 @@ function loadImageByName(name) {
   tImg.onload = () => {
     tLoaded = true;
     fitToCanvas();
-    tBoxes = []; // limpia
+    tBoxes = [];
 
-    // cargar etiquetas YOLO para el canvas principal
     fetchYoloLabels(currentSplit, name).then(labels=>{
       const iw = tImg.naturalWidth, ih = tImg.naturalHeight;
       tBoxes = labels.map(l => yoloToXYWH(l, iw, ih));
       redrawTrain();
     });
 
-    // resalta la miniatura activa si tenemos índice
     if (currentIndex >= 0) setActiveThumbByIndex(currentIndex);
   };
 }
@@ -364,6 +462,8 @@ function buildFilmstrip(images) {
     const item = document.createElement('div');
     item.className = 'strip-thumb';
     item.title     = name;
+    item.dataset.name  = name;   // para refresh focalizado
+    item.dataset.split = split;  // para refresh focalizado
 
     const img = document.createElement('img');
     img.loading = 'lazy';
@@ -389,7 +489,7 @@ function buildFilmstrip(images) {
       openPreview(name);
     });
 
-    // cuando la miniatura esté lista, traemos labels y pintamos overlay
+    // pintar overlay en la miniatura al cargar
     const ensureOverlay = async () => {
       const labels = await fetchYoloLabels(split, name);
       if (!labels.length) return;
@@ -425,18 +525,16 @@ function buildFilmstrip(images) {
     if (!fsDragging) return;
     e.preventDefault();
     const x = e.pageX - stripTrack.offsetLeft;
-    const walk = (x - fsStartX) * 1; // factor de arrastre
+    const walk = (x - fsStartX) * 1;
     stripTrack.scrollLeft = fsScrollLeft - walk;
     updateStripScrollbar();
   });
 
   // Scroll con rueda del ratón (horizontal)
   stripTrack.addEventListener('wheel', (e) => {
-    // Shift+rueda o rueda normal: desplaza horizontal
     const delta = (Math.abs(e.deltaX) > Math.abs(e.deltaY)) ? e.deltaX : e.deltaY;
     stripTrack.scrollLeft += delta;
     updateStripScrollbar();
-    // Evitamos que la página intente hacer scroll vertical
     e.preventDefault();
   }, { passive: false });
 
@@ -444,7 +542,7 @@ function buildFilmstrip(images) {
   updateStripScrollbar();
 }
 
-// Botones filmstrip: además de navegar, desplazan la tira una página aprox.
+// Botones filmstrip
 function scrollFilmstripPage(dir = 1) {
   if (!stripTrack) return;
   const page = stripTrack.clientWidth * 0.9;
@@ -454,120 +552,196 @@ function scrollFilmstripPage(dir = 1) {
 stripPrev?.addEventListener('click', () => { goRelative(-1); scrollFilmstripPage(-1); });
 stripNext?.addEventListener('click', () => { goRelative(+1); scrollFilmstripPage(+1); });
 
-// ===== NUEVO: sincronización del range inferior =====
+// ===== sincronización del range inferior =====
 function updateStripScrollbar(){
   if (!stripTrack || !stripScroll) return;
   const max = Math.max(0, stripTrack.scrollWidth - stripTrack.clientWidth);
   stripScroll.max = String(Math.floor(max));
   stripScroll.value = String(Math.floor(stripTrack.scrollLeft));
-  // Mostrar/ocultar si no hay overflow
   stripScroll.style.visibility = max > 0 ? 'visible' : 'hidden';
 }
 
 function initStripScrollbarSync(){
   if (!stripTrack || !stripScroll) return;
 
-  // 1) mover el scroll con el range
   stripScroll.addEventListener('input', () => {
     stripTrack.scrollLeft = Number(stripScroll.value || 0);
   });
 
-  // 2) actualizar el range cuando se haga scroll (ratón/gesto/botones)
   stripTrack.addEventListener('scroll', () => {
     stripScroll.value = String(Math.floor(stripTrack.scrollLeft));
   });
 
-  // 3) Recalcular límites en cambios de tamaño/contenido
   const ro = new ResizeObserver(() => updateStripScrollbar());
   ro.observe(stripTrack);
 
-  // fallback por si cambia el viewport
   window.addEventListener('resize', updateStripScrollbar);
 
-  // Inicial
   updateStripScrollbar();
 }
 
 // =======================================================
-// 8) EVENTOS CANVAS / CONTROLES
+// 8) EVENTOS CANVAS / CONTROLES (Pointer + DPI + Pan/Zoom)
 // =======================================================
+let rafId = null;
+function scheduleRedraw() {
+  if (rafId) return;
+  rafId = requestAnimationFrame(() => { rafId = null; redrawTrain(); });
+}
 
-// Split cambiado
-splitSelect.addEventListener('change', async () => {
-  await loadImageList();
+// Resync canvas cuando cambie el viewport
+window.addEventListener('resize', () => {
+  if (!tLoaded) { syncCanvasDPI(); scheduleRedraw(); return; }
+  syncCanvasDPI();
+  // re-centrar imagen al nuevo tamaño
+  fitToCanvas();
+  scheduleRedraw();
 });
 
-// Cargar (forzar recarga actual) — botón oculto por CSS pero funcional
+// Split cambiado
+splitSelect.addEventListener('change', loadImageList);
+
+// Cargar actual
 loadImageBtn.addEventListener('click', () => {
   if (currentIndex >= 0) loadImageByIndex(currentIndex);
 });
 
-// Canvas interacciones
-tCanvas.addEventListener('mousemove', (e) => {
+// Estado para pointer
+let pointerId = null;
+
+tCanvas.addEventListener('pointermove', (e) => {
   const r = tCanvas.getBoundingClientRect();
-  tMouseX = e.clientX - r.left; tMouseY = e.clientY - r.top;
-  if (tDrawing) {
-    const {ix, iy} = screenToImage(tMouseX, tMouseY);
-    tPrevW = ix - tStartX; tPrevH = iy - tStartY;
+  tMouseX = (e.clientX - r.left) * DPR;  // ← antes: sin *DPR
+  tMouseY = (e.clientY - r.top)  * DPR;  // ← antes: sin *DPR
+  if (panning) {
+    const dx = tMouseX - panStart.x;
+    const dy = tMouseY - panStart.y;
+    tOffX = panOffStart.x + dx;
+    tOffY = panOffStart.y + dy;
+    scheduleRedraw();
+    return;
   }
-  redrawTrain();
+
+  if (tDrawing) {
+    const { ix, iy } = screenToImage(tMouseX, tMouseY);
+    const clamped = clampToImage(ix, iy);
+    tPrevW = clamped.ix - tStartX;
+    tPrevH = clamped.iy - tStartY;
+  }
+  scheduleRedraw();
 });
 
-tCanvas.addEventListener('mousedown', (e) => {
+tCanvas.addEventListener('pointerdown', (e) => {
   if (!tLoaded) return;
+  if (e.detail > 1) return; // evita conflicto con dblclick/lightbox
+
+  pointerId = e.pointerId;
+  tCanvas.setPointerCapture(pointerId);
+
   const r = tCanvas.getBoundingClientRect();
-  const sx = e.clientX - r.left, sy = e.clientY - r.top;
-  const {ix, iy} = screenToImage(sx, sy);
-  tDrawing = true; tStartX = ix; tStartY = iy; tPrevW = 0; tPrevH = 0;
+  const sx = (e.clientX - r.left) * DPR;
+  const sy = (e.clientY - r.top)  * DPR;
+
+  // PAN con botón central (1), derecho (2) o con modificadores (Shift/Ctrl/Alt/Cmd/Espacio)
+  const wantsPan =
+    (e.button === 1) ||
+    (e.button === 2) ||
+    (e.button === 0 && (e.shiftKey || e.ctrlKey || e.metaKey || e.altKey || (e.getModifierState && e.getModifierState('Space'))));
+
+  if (wantsPan) {
+    panning = true;
+    panStart.x = sx;
+    panStart.y = sy;
+    panOffStart.x = tOffX;
+    panOffStart.y = tOffY;
+    return; // no iniciamos caja
+  }
+
+  const { ix, iy } = screenToImage(sx, sy);
+  const clamped = clampToImage(ix, iy);
+
+  tDrawing = true;
+  tStartX = clamped.ix;
+  tStartY = clamped.iy;
+  tPrevW = 0; tPrevH = 0;
+
+  scheduleRedraw();
 });
 
-tCanvas.addEventListener('mouseup', () => {
+function finishBox() {
   if (!tDrawing) return;
   tDrawing = false;
-  const w = tPrevW, h = tPrevH;
-  const box = { x: w>=0 ? tStartX : tStartX+w, y: h>=0 ? tStartY : tStartY+h, w: Math.abs(w), h: Math.abs(h) };
-  if (box.w > 2 && box.h > 2) {
-    // adjunta la clase seleccionada al nuevo bbox
+
+  const endX = tStartX + tPrevW;
+  const endY = tStartY + tPrevH;
+
+  const a = clampToImage(tStartX, tStartY);
+  const b = clampToImage(endX, endY);
+
+  const x = Math.min(a.ix, b.ix);
+  const y = Math.min(a.iy, b.iy);
+  const w = Math.abs(a.ix - b.ix);
+  const h = Math.abs(a.iy - b.iy);
+
+  if (w >= 2 && h >= 2) {
     const clsIndex = Math.max(0, classSelect.selectedIndex);
-    box.cls = clsIndex;
-    tBoxes.push(box);
+    tBoxes.push({ x, y, w, h, cls: clsIndex });
   }
+
   tPrevW = tPrevH = 0;
-  redrawTrain();
+  scheduleRedraw();
+}
+
+tCanvas.addEventListener('pointerup', (e) => {
+  try { if (pointerId != null) tCanvas.releasePointerCapture(pointerId); } catch {}
+  pointerId = null;
+  if (panning) { panning = false; scheduleRedraw(); return; }
+  finishBox();
 });
 
-// Zoom centrado en punto
+window.addEventListener('pointerup', () => {
+  if (panning) { panning = false; scheduleRedraw(); }
+  else if (tDrawing) finishBox();
+});
+
+// Zoom centrado y estable en el punto del cursor
 function zoomAt(factor, cx, cy) {
-  // Guardamos punto en coords de imagen ANTES del zoom
   const before = screenToImage(cx, cy);
-  // Ajustamos escala
-  const newScale = tScale * factor;
 
-  // Limitar zoom
   const minScale = 0.1, maxScale = 20;
-  tScale = Math.min(maxScale, Math.max(minScale, newScale));
+  const newScale = Math.min(maxScale, Math.max(minScale, tScale * factor));
 
-  // Reposicionar offsets para mantener el punto bajo el cursor
-  const after = screenToImage(cx, cy);
-  tOffX += (cx - (after.ix * tScale + tOffX)) - (cx - (before.ix * (tScale/factor) + tOffX));
-  tOffY += (cy - (after.iy * tScale + tOffY)) - (cy - (before.iy * (tScale/factor) + tOffY));
+  tOffX = cx - (before.ix * newScale);
+  tOffY = cy - (before.iy * newScale);
+  tScale = newScale;
 
-  redrawTrain();
+  scheduleRedraw();
 }
 
 zoomInBtn.addEventListener('click', () => zoomAt(1.1, tCanvas.width/2, tCanvas.height/2));
 zoomOutBtn.addEventListener('click', () => zoomAt(1/1.1, tCanvas.width/2, tCanvas.height/2));
-resetViewBtn.addEventListener('click', () => { if (tLoaded) { fitToCanvas(); redrawTrain(); } });
+resetViewBtn.addEventListener('click', () => { if (tLoaded) { fitToCanvas(); scheduleRedraw(); } });
 
+// Rueda: zoom por defecto; si mantienes Shift, hace pan fino con rueda
 tCanvas.addEventListener('wheel', (e) => {
   e.preventDefault();
+
+  if (e.shiftKey) {
+    // Pan fino con rueda: desplaza offsets en px de pantalla
+    tOffY -= e.deltaY;
+    tOffX -= e.deltaX;
+    scheduleRedraw();
+    return;
+  }
+
+  // Zoom centrado en el cursor
   const factor = e.deltaY < 0 ? 1.1 : 1/1.1;
   zoomAt(factor, tMouseX, tMouseY);
-}, {passive:false});
+}, { passive: false });
 
 // Edición cajas
-undoBoxBtn.addEventListener('click', () => { tBoxes.pop(); redrawTrain(); }); // botón oculto por CSS
-clearBoxesBtn.addEventListener('click', () => { tBoxes = []; redrawTrain(); });
+undoBoxBtn.addEventListener('click', () => { tBoxes.pop(); scheduleRedraw(); });
+clearBoxesBtn.addEventListener('click', () => { tBoxes = []; scheduleRedraw(); });
 
 // Guardado
 saveAnnBtn?.addEventListener('click', async () => {
@@ -581,51 +755,31 @@ saveAnnBtn?.addEventListener('click', async () => {
     body: JSON.stringify(payload)
   });
   const data = await resp.json();
-  if (resp.ok) alert(`Etiquetas guardadas: ${data.saved}`);
-  else alert(`Error: ${data.error || 'fallo al guardar'}`);
-});
 
-// Subida
-uploadBtn?.addEventListener('click', async () => {
-  const files = fileInput?.files;
-  if (!files || files.length === 0) {
-    alert("Selecciona al menos una imagen (.jpg/.png).");
-    return;
-  }
-  const split = splitSelect.value || 'train';
-
-  uploadBtn.disabled = true;
-  uploadInfo.textContent = "Subiendo...";
-  try {
-    let saved = 0, errs = 0;
-    for (const f of files) {
-      const per = new FormData();
-      per.append('split', split);
-      per.append('image', f, f.name);
-      const r = await fetch('/upload_training_image', { method: 'POST', body: per });
-      if (r.ok) saved++; else errs++;
-    }
-    await loadImageList();
-    uploadInfo.textContent = `Subidas: ${saved} | Errores: ${errs}`;
-  } catch (e) {
-    console.error(e);
-    uploadInfo.textContent = "Error al subir.";
-  } finally {
-    uploadBtn.disabled = false;
-    fileInput.value = "";
+  if (resp.ok) {
+    alert(`Etiquetas guardadas: ${data.saved}`);
+    // Refresca overlay de la miniatura actual y lightbox si procede
+    await refreshThumbOverlay(currentImage, currentSplit);
+    await refreshLightboxOverlay();
+  } else {
+    alert(`Error: ${data.error || 'fallo al guardar'}`);
   }
 });
 
 // Teclado
 window.addEventListener('keydown', (e) => {
   if (e.target && ['INPUT','SELECT','TEXTAREA'].includes(e.target.tagName)) return;
+  if (e.key === 'Escape') {
+    if (tDrawing) { tDrawing = false; tPrevW = tPrevH = 0; scheduleRedraw(); return; }
+    if (panning)  { panning  = false; scheduleRedraw(); return; }
+  }
   if (e.key === 'ArrowLeft')  { e.preventDefault(); goRelative(-1); }
   if (e.key === 'ArrowRight') { e.preventDefault(); goRelative(+1); }
   if (e.key === 'PageUp')     { e.preventDefault(); goRelative(-5); }
   if (e.key === 'PageDown')   { e.preventDefault(); goRelative(+5); }
 });
 
-// Lightbox helpers (opcional)
+// Lightbox helpers
 function closePreview(e) {
   e.stopPropagation();
   imgLightbox?.classList.add('hidden');
@@ -642,7 +796,6 @@ function openPreview(name){
     const iw = imgFull.naturalWidth || 0;
     const ih = imgFull.naturalHeight || 0;
     const boxesPx = (iw && ih) ? labels.map(l => yoloToXYWH(l, iw, ih)) : [];
-    // El contenedor del overlay en el lightbox es .modal-inner (padre directo)
     const container = imgFull.closest('.modal-inner');
     drawOverlayBoxes(container, imgFull, boxesPx, { labelNames: getClassListArray() });
   };
@@ -651,8 +804,9 @@ function openPreview(name){
   else imgFull.onload = afterLoad;
 }
 
-// abrir lightbox desde el canvas actual con doble click
+// abrir lightbox desde el canvas actual con doble click (sin conflicto con dibujo)
 tCanvas.addEventListener('dblclick', () => {
+  if (tDrawing || panning) return;
   if (currentImage) openPreview(currentImage);
 });
 
@@ -660,7 +814,9 @@ tCanvas.addEventListener('dblclick', () => {
 // 9) INIT
 // =======================================================
 window.addEventListener('DOMContentLoaded', async () => {
+  syncCanvasDPI();
   await loadClasses();
-  await loadImageList();  // construye filmstrip y auto-carga
-  initStripScrollbarSync(); // activar sincronización range <-> scroll
+  await loadImageList();            // construye filmstrip y auto-carga
+  initStripScrollbarSync();         // activar sincronización range <-> scroll
+  scheduleRedraw();
 });

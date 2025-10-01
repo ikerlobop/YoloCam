@@ -74,10 +74,12 @@ state = {
 lock = threading.Lock()
 
 # ----------------- AUTH / USERS (SQLite) -----------------
+
 def get_db():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
+
 
 def _safe_add_column(conn: sqlite3.Connection, table: str, colspec: str):
     try:
@@ -86,32 +88,38 @@ def _safe_add_column(conn: sqlite3.Connection, table: str, colspec: str):
     except Exception:
         pass  # ya existe
 
+
 def init_db():
     conn = get_db()
-    conn.execute("""
-    CREATE TABLE IF NOT EXISTS users (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL,
-        email TEXT UNIQUE NOT NULL,
-        role TEXT NOT NULL,
-        password_hash TEXT NOT NULL
-    );
-    """)
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            email TEXT UNIQUE NOT NULL,
+            role TEXT NOT NULL,
+            password_hash TEXT NOT NULL
+        );
+        """
+    )
     # Tabla de capturas (guardamos la RUTA DE LA COPIA bajo static/layers/…)
-    conn.execute("""
-    CREATE TABLE IF NOT EXISTS captures (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        path TEXT NOT NULL,        -- ruta relativa servible por /static (p.ej: layers/layer_3/abcd.jpg)
-        layer INTEGER NOT NULL,    -- nº de capa (1..N)
-        split TEXT NOT NULL,       -- 'valid_only' (o el split activo)
-        ts INTEGER NOT NULL        -- epoch seconds
-    );
-    """)
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS captures (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            path TEXT NOT NULL,        -- ruta relativa servible por /static (p.ej: layers/layer_3/abcd.jpg)
+            layer INTEGER NOT NULL,    -- nº de capa (1..N)
+            split TEXT NOT NULL,       -- 'valid_only' (o el split activo)
+            ts INTEGER NOT NULL        -- epoch seconds
+        );
+        """
+    )
     _safe_add_column(conn, "captures", "src_path TEXT")      # p.ej: dataset/valid/images/foo.jpg
     _safe_add_column(conn, "captures", "labels_json TEXT")   # JSON con cajas normalizadas
     conn.execute("CREATE INDEX IF NOT EXISTS idx_captures_layer_ts ON captures(layer, ts DESC);")
     conn.commit()
     conn.close()
+
 
 def create_user(name: str, email: str, role: str, password: str):
     conn = get_db()
@@ -122,12 +130,14 @@ def create_user(name: str, email: str, role: str, password: str):
     conn.commit()
     conn.close()
 
+
 def find_user_by_email(email: str):
     conn = get_db()
     cur = conn.execute("SELECT * FROM users WHERE email=?", (email.lower().strip(),))
     row = cur.fetchone()
     conn.close()
     return row
+
 
 def login_required(fn):
     @wraps(fn)
@@ -137,13 +147,14 @@ def login_required(fn):
         return fn(*args, **kwargs)
     return wrapper
 
+
 # ----------------- LOGIN -----------------
 @app.route("/login", methods=["GET", "POST"])
 def login():
     next_url = request.values.get("next") or "/"
     if request.method == "POST":
-        email = request.form.get("email","").strip().lower()
-        password = request.form.get("password","")
+        email = request.form.get("email", "").strip().lower()
+        password = request.form.get("password", "")
         user = find_user_by_email(email)
         if user and check_password_hash(user["password_hash"], password):
             session["user_id"] = user["id"]
@@ -156,10 +167,12 @@ def login():
     else:
         return render_template("login.html", error=None, next_url=next_url)
 
+
 @app.route("/logout")
 def logout():
-    session.clear
+    session.clear()
     return redirect(url_for("login"))
+
 
 # ----------------- SISTEMA -----------------
 @app.route("/system")
@@ -189,6 +202,7 @@ def get_system_info():
         "model": model
     })
 
+
 @app.route("/me")
 def me():
     if "user_id" not in session:
@@ -201,12 +215,16 @@ def me():
         "role": session["user_role"]
     })
 
+
 # ----------------- DATASET UTILS (SIMULACIÓN) -----------------
+
 def _images_dir_for(split: str) -> str:
     return os.path.join(DATASET_DIR, split, "images")
 
+
 def _labels_dir_for(split: str) -> str:
     return os.path.join(DATASET_DIR, split, "labels")
+
 
 def _has_label(split: str, image_filename: str) -> bool:
     if not REQUIRE_LABEL:
@@ -215,9 +233,9 @@ def _has_label(split: str, image_filename: str) -> bool:
     label_path = os.path.join(_labels_dir_for(split), stem + ".txt")
     return os.path.isfile(label_path)
 
+
 def _list_images(split: str) -> List[str]:
-    """
-    Devuelve rutas relativas (desde static/) de imágenes válidas del split.
+    """Devuelve rutas relativas (desde static/) de imágenes válidas del split.
     En simulación tomamos TODAS las de valid/images aunque no haya labels.
     """
     img_dir = _images_dir_for(split)
@@ -238,6 +256,7 @@ def _list_images(split: str) -> List[str]:
 
     return with_label if REQUIRE_LABEL else all_imgs
 
+
 def build_pool(mode: str) -> List[str]:
     mode = (mode or "").lower()
     if mode == "train_only":
@@ -249,15 +268,14 @@ def build_pool(mode: str) -> List[str]:
     else:
         pool = _list_images("valid")  # simulación principal
     print(f"[INFO] SPLIT_MODE={mode} -> {len(pool)} imágenes en pool")
-    random.shuffle(pool
-    )
+    random.shuffle(pool)
     return pool
 
+
 # ---------- Labels (YOLO) ----------
+
 def _labels_path_for_src(path_rel_src: str) -> Optional[str]:
-    """
-    Recibe 'dataset/<split>/images/file.jpg' y devuelve ruta absoluta al TXT en '.../labels/file.txt'
-    """
+    """Recibe 'dataset/<split>/images/file.jpg' y devuelve ruta absoluta al TXT en '.../labels/file.txt'"""
     if not path_rel_src:
         return None
     parts = path_rel_src.replace("\\", "/").split("/")
@@ -268,6 +286,7 @@ def _labels_path_for_src(path_rel_src: str) -> Optional[str]:
     stem, _ = os.path.splitext(fname)
     abs_txt = os.path.join(app.static_folder, "dataset", split, "labels", stem + ".txt")
     return abs_txt
+
 
 def _parse_yolo_txt(abs_txt: str) -> List[dict]:
     out = []
@@ -294,10 +313,11 @@ def _parse_yolo_txt(abs_txt: str) -> List[dict]:
         print(f"[WARN] No se pudo parsear labels {abs_txt}: {e}")
     return out
 
+
 # ----------------- PERSISTENCIA DE CAPTURAS (COPIA A layers/) -----------------
+
 def save_capture(path_rel_src: str, layer: int, split: str):
-    """
-    Crea una COPIA de la imagen del dataset en static/layers/layer_<layer>/uuid.ext
+    """Crea una COPIA de la imagen del dataset en static/layers/layer_<layer>/uuid.ext
     y guarda en DB la ruta de la COPIA (relativa a /static) + labels normalizados.
     El dataset original (static/dataset/...) no se toca nunca.
     """
@@ -331,8 +351,7 @@ def save_capture(path_rel_src: str, layer: int, split: str):
 
 
 def bundle_layer_assets(layer: int, grid_cols: int = 5, grid_rows: int = 2, gutter: int = 0):
-    """
-    Copia las imágenes de static/layers/layer_<layer>/ a
+    """Copia las imágenes de static/layers/layer_<layer>/ a
     static/imagen_capa/layer_<layer>/images/
     y genera una lámina (contact sheet) sin bandas negras (modo COVER) en:
     static/imagen_capa/layer_<layer>/layer_<layer>.jpg
@@ -427,6 +446,7 @@ def bundle_layer_assets(layer: int, grid_cols: int = 5, grid_rows: int = 2, gutt
 
 
 # ----------------- CAPTURA (SELECCIÓN ALEATORIA) -----------------
+
 def capture_loop():
     try:
         # fijar id de capa para toda la captura (evita carreras)
@@ -487,66 +507,7 @@ def capture_loop():
             bundle_layer_assets(layer_id)
         except Exception as e2:
             print(f"[WARN] bundle (on error) layer {layer_id}: {e2}")
-def capture_loop():
-    try:
-        # fijar id de capa para toda la captura (evita carreras)
-        with lock:
-            layer_id = state["layer_current"]
 
-        pool_remaining = build_pool(SPLIT_MODE)
-        if not pool_remaining:
-            raise RuntimeError(
-                f"No hay imágenes válidas en '{SPLIT_MODE}'. Revisa static/dataset/<split>/images"
-            )
-
-        slot_idx = 0
-        while slot_idx < TOTAL_SLOTS:
-            with lock:
-                if len(state["images"]) >= TOTAL_SLOTS:
-                    state["running"] = False
-                    state["stopped"] = True
-            # fuera del lock: comprobamos y empaquetamos
-            if len(state["images"]) >= TOTAL_SLOTS:
-                try:
-                    bundle_layer_assets(layer_id)
-                except Exception as e:
-                    print(f"[WARN] bundle layer {layer_id}: {e}")
-                break
-
-            if not pool_remaining:
-                with lock:
-                    state["running"] = False
-                    state["stopped"] = True
-                    state["error"] = "No quedan imágenes disponibles."
-                try:
-                    bundle_layer_assets(layer_id)
-                except Exception as e:
-                    print(f"[WARN] bundle layer {layer_id}: {e}")
-                break
-
-            chosen = pool_remaining.pop(0)  # ruta relativa al dataset (para el grid)
-            with lock:
-                state["images"].append(chosen)
-                current_layer = state["layer_current"]
-                slot_idx += 1
-                print(f"[DEBUG] Slot {slot_idx} cargado con {chosen}")
-
-            try:
-                save_capture(chosen, current_layer, SPLIT_MODE)
-            except Exception as e:
-                print(f"[WARN] No se pudo guardar la captura en DB: {e}")
-
-            time.sleep(CYCLE_SECONDS)
-
-    except Exception as e:
-        with lock:
-            state["error"] = str(e)
-            state["running"] = False
-            state["stopped"] = True
-        try:
-            bundle_layer_assets(layer_id)
-        except Exception as e2:
-            print(f"[WARN] bundle (on error) layer {layer_id}: {e2}")
 
 
 def ensure_thread():
@@ -561,11 +522,14 @@ def ensure_thread():
     t.start()
     return True
 
+
 # ----------------- RUTAS PRINCIPALES -----------------
+
 @app.route("/")
 @login_required
 def index():
     return render_template("index.html")
+
 
 @app.route("/state")
 def get_state():
@@ -595,6 +559,7 @@ def get_state():
         "mode": SPLIT_MODE
     })
 
+
 @app.route("/layers")
 def get_layers():
     with lock:
@@ -602,6 +567,7 @@ def get_layers():
             "current": state["layer_current"],
             "total": state["layer_total"]
         })
+
 
 @app.route("/start_capture", methods=["POST"])
 @login_required
@@ -621,6 +587,7 @@ def start_capture():
         "layer_total": lt
     })
 
+
 @app.route("/reset_capture", methods=["POST"])
 @login_required
 def reset_capture():
@@ -628,12 +595,14 @@ def reset_capture():
         state.update({"images": [], "running": False, "stopped": False, "error": None})
     return jsonify({"status": "reset_done"})
 
+
 @app.route("/reset_layers", methods=["POST"])
 @login_required
 def reset_layers():
     with lock:
         state["layer_current"] = 0
     return jsonify({"status": "layers_reset", "current": 0, "total": state["layer_total"]})
+
 
 # --- Biblioteca: SOLO devuelve copias bajo static/layers/ + labels si existen ---
 @app.route("/library")
@@ -670,18 +639,22 @@ def library():
 
     return jsonify({"images": urls, "items": items, "layer": layer or 0})
 
+
 @app.route("/layers_summary")
 @login_required
 def layers_summary():
     conn = get_db()
-    rows = conn.execute("""
+    rows = conn.execute(
+        """
         SELECT layer, COUNT(*) AS n
         FROM captures
         GROUP BY layer
         ORDER BY layer ASC
-    """).fetchall()
+        """
+    ).fetchall()
     conn.close()
     return jsonify({"layers": [{"layer": r[0], "count": r[1]} for r in rows]})
+
 
 @app.route("/library/delete_layer", methods=["POST"])
 @login_required
@@ -704,7 +677,7 @@ def library_delete_layer():
         if layer == 0:
             rows = conn.execute("SELECT path FROM captures WHERE path LIKE ?", (f"{LAYERS_ROOT_REL}/%",)).fetchall()
         else:
-            rows = conn.execute("SELECT path FROM captures WHERE layer=?", (layer,)).fetchall()
+            rows = conn.execute("SELECT path FROM captures WHERE layer= ?", (layer,)).fetchall()
         for (rel_path,) in rows:
             rel_norm = (rel_path or "").replace("\\", "/")
             if rel_norm.startswith(f"{LAYERS_ROOT_REL}/"):
@@ -737,6 +710,7 @@ def library_delete_layer():
         "deleted_db": deleted,
         "deleted_files": files_removed if delete_files else None
     })
+
 
 @app.route("/imagen_capa/delete_layer", methods=["POST"])
 @login_required
@@ -788,15 +762,45 @@ def delete_layer_sheet():
 def training():
     return render_template("training.html")
 
+
 # ====== ENTRENAMIENTO / ANOTACIÓN ======
-CLASSES_FILE = os.path.join(os.getcwd(), "classes.txt")
+# Localización robusta de classes.txt
+CLASSES_FILE_ENV = os.environ.get("CLASSES_FILE", "").strip()
+
+def _resolve_classes_file():
+    """Devuelve la primera ruta existente para classes.txt.
+    Orden de búsqueda:
+      1) Variable de entorno CLASSES_FILE
+      2) Raíz de la app (junto a app.py): app.root_path/classes.txt
+      3) Directorio de trabajo actual: cwd/classes.txt
+      4) static/dataset/classes.txt
+    """
+    candidates = []
+    if CLASSES_FILE_ENV:
+        candidates.append(CLASSES_FILE_ENV)
+    # 2) junto a app.py
+    candidates.append(os.path.join(app.root_path, "classes.txt"))
+    # 3) cwd
+    candidates.append(os.path.join(os.getcwd(), "classes.txt"))
+    # 4) en static/dataset
+    candidates.append(os.path.join(app.static_folder, "dataset", "classes.txt"))
+
+    for p in candidates:
+        if p and os.path.isfile(p):
+            return p
+    # si no existe ninguno, devolvemos la opción por defecto (junto a app.py)
+    return os.path.join(app.root_path, "classes.txt")
+
+CLASSES_FILE = _resolve_classes_file()
+
 
 def _dataset_images(split: str):
     split = (split or "train").lower()
     img_dir = os.path.join(app.static_folder, "dataset", split, "images")
     if not os.path.isdir(img_dir):
         return []
-    return sorted([f for f in os.listdir(img_dir) if f.lower().endswith((".jpg",".jpeg",".png"))])
+    return sorted([f for f in os.listdir(img_dir) if f.lower().endswith((".jpg", ".jpeg", ".png"))])
+
 
 @app.route("/annotate/images")
 @login_required
@@ -805,41 +809,67 @@ def annotate_images():
     items = _dataset_images(split)
     return jsonify({"split": split, "images": items})
 
+
 def _classes_list():
+    """Lee classes.txt desde la ruta resuelta dinámicamente.
+    Si no existe, devuelve [].
+    """
+    global CLASSES_FILE
+    # re-resolver por si el archivo aparece después de arrancar
+    CLASSES_FILE = _resolve_classes_file()
     if not os.path.isfile(CLASSES_FILE):
         return []
     with open(CLASSES_FILE, "r", encoding="utf-8") as fh:
         return [l.strip() for l in fh if l.strip()]
 
+
 @app.route("/annotate/classes")
 @login_required
 def annotate_classes():
-    if not os.path.isfile(CLASSES_FILE):
-        return jsonify({"classes": []})
-    with open(CLASSES_FILE, "r", encoding="utf-8") as fh:
-        classes = [l.strip() for l in fh if l.strip()]
-    return jsonify({"classes": classes})
+    # re-resolver cada vez para facilitar debug y hot-reload
+    path = _resolve_classes_file()
+    classes = []
+    exists = os.path.isfile(path)
+    mtime = None
+    if exists:
+        try:
+            with open(path, "r", encoding="utf-8") as fh:
+                classes = [l.strip() for l in fh if l.strip()]
+            mtime = os.path.getmtime(path)
+        except Exception:
+            classes = []
+    return jsonify({
+        "classes": classes,
+        "path": path,
+        "exists": exists,
+        "mtime": mtime
+    })
+
 
 @app.route("/annotate/save", methods=["POST"])
 @login_required
 def annotate_save():
     """
-    Body JSON:
+    Body JSON esperado:
       {
         "split": "train|valid|test",
         "image": "nombre.jpg",
-        "label": "grieta",             # texto presente en classes.txt
-        "boxes": [{"x":..,"y":..,"w":..,"h":..}, ...]  # coords en PIXELES de la imagen original
+        "label": "opcional: nombre de clase por defecto (texto en classes.txt)",
+        "boxes": [
+          {"x":..,"y":..,"w":..,"h":.., "cls": <int opcional>},
+          ...
+        ]   # coords en PIXELES de la imagen original
       }
-    Guarda/overwrite el TXT en static/dataset/<split>/labels/<stem>.txt
+
+    Escribe/overwrite YOLO TXT en static/dataset/<split>/labels/<stem>.txt
     """
     data = request.get_json(silent=True) or {}
     split = (data.get("split") or "train").lower()
     image = data.get("image")
-    label = (data.get("label") or "").strip()
+    default_label_name = (data.get("label") or "").strip()
     boxes = data.get("boxes") or []
 
-    if not image or not label or not isinstance(boxes, list):
+    if not image or not isinstance(boxes, list):
         return jsonify({"error": "payload incompleto"}), 400
 
     img_abs = os.path.join(app.static_folder, "dataset", split, "images", image)
@@ -853,49 +883,85 @@ def annotate_save():
     except Exception as e:
         return jsonify({"error": f"PIL no pudo abrir imagen: {e}"}), 500
 
+    # Cargar clases
     classes = _classes_list()
     if not classes:
         return jsonify({"error": "classes.txt no encontrado o vacío"}), 400
-    try:
-        class_id = classes.index(label)
-    except ValueError:
-        return jsonify({"error": f"label '{label}' no está en classes.txt"}), 400
 
-    labels_dir = os.path.join(app.static_folder, "dataset", split, "labels")
-    os.makedirs(labels_dir, exist_ok=True)
+    # Clase por defecto (opcional)
+    default_cls = None
+    if default_label_name:
+        try:
+            default_cls = classes.index(default_label_name)
+        except ValueError:
+            return jsonify({"error": f"label '{default_label_name}' no está en classes.txt"}), 400
 
-    stem, _ = os.path.splitext(image)
-    txt_abs = os.path.join(labels_dir, stem + ".txt")
+    def clamp01(v):
+        return max(0.0, min(1.0, float(v)))
 
     lines = []
-    def clamp(v, lo=0.0, hi=1.0): return max(lo, min(hi, v))
     for b in boxes:
-        x = float(b.get("x", 0)); y = float(b.get("y", 0))
-        w = float(b.get("w", 0)); h = float(b.get("h", 0))
-        x = max(0, min(x, iw)); y = max(0, min(y, ih))
-        w = max(1, min(w, iw - x)); h = max(1, min(h, ih - y))
+        # 1) Resolver clase por caja
+        cls_from_box = b.get("cls", None)
+        if cls_from_box is not None:
+            try:
+                cls_idx = int(cls_from_box)
+            except Exception:
+                return jsonify({"error": f"cls inválido en box: {cls_from_box}"}), 400
+            if not (0 <= cls_idx < len(classes)):
+                return jsonify({"error": f"cls fuera de rango: {cls_idx}"}), 400
+        elif default_cls is not None:
+            cls_idx = default_cls
+        else:
+            return jsonify({"error": "cada box debe tener 'cls' o provee 'label' por defecto"}), 400
+
+        # 2) Coords px -> normalizadas YOLO
+        try:
+            x = float(b.get("x", 0)); y = float(b.get("y", 0))
+            w = float(b.get("w", 0)); h = float(b.get("h", 0))
+        except Exception:
+            return jsonify({"error": "coords no numéricas en alguna box"}), 400
+
+        # recortar a la imagen y asegurar tamaños > 0
+        x = max(0, min(x, iw))
+        y = max(0, min(y, ih))
+        w = max(1, min(w, iw - x))
+        h = max(1, min(h, ih - y))
+
         xc = (x + w/2) / iw
         yc = (y + h/2) / ih
         nw = w / iw
         nh = h / ih
-        lines.append(f"{class_id} {clamp(xc):.6f} {clamp(yc):.6f} {clamp(nw):.6f} {clamp(nh):.6f}")
+
+        lines.append(f"{cls_idx} {clamp01(xc):.6f} {clamp01(yc):.6f} {clamp01(nw):.6f} {clamp01(nh):.6f}")
+
+    labels_dir = os.path.join(app.static_folder, "dataset", split, "labels")
+    os.makedirs(labels_dir, exist_ok=True)
+    stem, _ = os.path.splitext(image)
+    txt_abs = os.path.join(labels_dir, stem + ".txt")
 
     with open(txt_abs, "w", encoding="utf-8") as fh:
         fh.write("\n".join(lines) + ("\n" if lines else ""))
 
-    return jsonify({"status": "ok", "saved": txt_abs.replace(app.static_folder+os.sep, "").replace("\\","/")})
+    return jsonify({
+        "status": "ok",
+        "saved": txt_abs.replace(app.static_folder + os.sep, "").replace("\\", "/"),
+        "boxes": len(lines)
+    })
+
 
 # ====== UPLOAD DE IMÁGENES POR SPLIT (opcionalmente con labels ya normalizados) ======
 ALLOWED_EXTS = {'.jpg', '.jpeg', '.png'}
 
+
 def _allowed_ext(filename: str) -> bool:
     return os.path.splitext(filename)[1].lower() in ALLOWED_EXTS
+
 
 @app.route("/upload_training_image", methods=["POST"])
 @login_required
 def upload_training_image():
-    """
-    Form-Data:
+    """Form-Data:
       - split: train|valid|test
       - image: archivo .jpg/.jpeg/.png
       - label_data: JSON opcional con [{"class_id":int,"bbox":[xc,yc,w,h]}, ...] normalizados
@@ -940,32 +1006,36 @@ def upload_training_image():
         with open(abs_txt, "w", encoding="utf-8") as f:
             for box in boxes or []:
                 cls = int(box.get("class_id", 0))
-                xc, yc, w, h = box.get("bbox", [0,0,0,0])
+                xc, yc, w, h = box.get("bbox", [0, 0, 0, 0])
                 f.write(f"{cls} {float(xc):.6f} {float(yc):.6f} {float(w):.6f} {float(h):.6f}\n")
-        saved_label = os.path.relpath(abs_txt, app.static_folder).replace("\\","/")
+        saved_label = os.path.relpath(abs_txt, app.static_folder).replace("\\", "/")
 
     return jsonify({
         "status": "ok",
         "split": split,
-        "image": os.path.relpath(abs_img, app.static_folder).replace("\\","/"),
+        "image": os.path.relpath(abs_img, app.static_folder).replace("\\", "/"),
         "label": saved_label
     })
 
+
 # ====== DATASET BROWSER ======
+
 def _list_split_items(split: str):
     img_dir = os.path.join(app.static_folder, "dataset", split, "images")
     out = []
     if os.path.isdir(img_dir):
         for f in sorted(os.listdir(img_dir)):
-            if f.lower().endswith((".jpg",".jpeg",".png")):
+            if f.lower().endswith((".jpg", ".jpeg", ".png")):
                 url = url_for("static", filename=f"dataset/{split}/images/{f}")
                 out.append({"name": f, "url": url})
     return out
+
 
 @app.route("/dataset_browser")
 @login_required
 def dataset_browser():
     return render_template("dataset.html")
+
 
 @app.route("/dataset/list")
 @login_required
@@ -977,12 +1047,12 @@ def dataset_list():
         data[sp] = {"count": len(items), "items": items}
     return jsonify(data)
 
+
 # ----------------- NUEVO: UPLOAD MÚLTIPLE POR SPLIT PARA dataset.js -----------------
 @app.post("/dataset/upload/<split>")
 @login_required
 def dataset_upload(split):
-    """
-    Endpoint para subir múltiples archivos al split indicado.
+    """Endpoint para subir múltiples archivos al split indicado.
     Front: FormData con 'files[]' (o 'files').
 
     Respuesta:
@@ -1026,6 +1096,7 @@ def dataset_upload(split):
 
     return jsonify(ok=True, added=added, errors=errors)
 
+
 @app.route("/dataset/open_folder/<split>", methods=["POST"])
 @login_required
 def open_folder(split):
@@ -1047,6 +1118,7 @@ def open_folder(split):
         return jsonify({"status": "ok"})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
 
 # ----------------- MAIN -----------------
 if __name__ == "__main__":
