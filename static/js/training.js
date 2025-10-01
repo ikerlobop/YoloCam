@@ -29,6 +29,9 @@ const stripScroll = document.getElementById('stripScroll');
 const imgFull     = document.getElementById('imgFull');
 const imgLightbox = document.getElementById('imgLightbox');
 
+// Coordenadas HUD
+const coordsHUD   = document.getElementById('coordsHUD');
+
 // Class editor (opcionales: sólo si añadiste el modal y botones)
 const classEditor     = document.getElementById('classEditor');
 const classListEl     = document.getElementById('classList');
@@ -270,6 +273,47 @@ function setActiveThumbByIndex(i) {
   });
   centerThumbInView(i);
   updateStripScrollbar();
+}
+
+function formatN(n, d=2){ return Number.isFinite(n) ? n.toFixed(d) : '-'; }
+
+function updateCoordsHUD(ix, iy){
+  if (!coordsHUD) return;
+
+  // Dimensiones de la imagen original (ESPACIO DE ETIQUETADO)
+  const iw = tImg?.naturalWidth  || 0;
+  const ih = tImg?.naturalHeight || 0;
+
+  // Recorta a la imagen (coordenadas válidas para labels)
+  const c = clampToImage(ix, iy);
+  const nx = iw ? c.ix / iw : 0;
+  const ny = ih ? c.iy / ih : 0;
+
+  // Si estamos dibujando, muestra caja en px + YOLO normalizado
+  if (tDrawing && iw && ih) {
+    const end = clampToImage(tStartX + tPrevW, tStartY + tPrevH);
+    const x = Math.min(tStartX, end.ix);
+    const y = Math.min(tStartY, end.iy);
+    const w = Math.abs(end.ix - tStartX);
+    const h = Math.abs(end.iy - tStartY);
+
+    // YOLO: centros y tamaños normalizados
+    const xc = (x + w/2) / iw;
+    const yc = (y + h/2) / ih;
+    const nw = w / iw;
+    const nh = h / ih;
+
+    coordsHUD.textContent =
+`PX   →  X:${formatN(c.ix,1)}  Y:${formatN(c.iy,1)}
+BOX  →  x:${formatN(x,1)}  y:${formatN(y,1)}  w:${formatN(w,1)}  h:${formatN(h,1)}
+YOLO →  cX:${formatN(xc,4)} cY:${formatN(yc,4)}  w:${formatN(nw,4)} h:${formatN(nh,4)}`;
+    return;
+  }
+
+  // Si NO estamos dibujando: muestra punto actual (px + normalizado)
+  coordsHUD.textContent =
+`PX   →  X:${formatN(c.ix,1)}  Y:${formatN(c.iy,1)}
+YOLO →  X:${formatN(nx,4)}  Y:${formatN(ny,4)}`;
 }
 
 // =======================================================
@@ -737,10 +781,17 @@ tCanvas.addEventListener('pointermove', (e) => {
     const clamped = clampToImage(ix, iy);
     tPrevW = clamped.ix - tStartX;
     tPrevH = clamped.iy - tStartY;
+    updateCoordsHUD(clamped.ix, clamped.iy);   // ← AQUÍ
+  } else {
+    const { ix, iy } = screenToImage(tMouseX, tMouseY);
+    updateCoordsHUD(ix, iy);                   // ← AQUÍ
   }
+
   scheduleRedraw();
 });
 
+
+// --- POINTER DOWN (inicio dibujo o pan) ---
 tCanvas.addEventListener('pointerdown', (e) => {
   if (!tLoaded) return;
   if (e.detail > 1) return; // evita conflicto con dblclick/lightbox
@@ -764,7 +815,11 @@ tCanvas.addEventListener('pointerdown', (e) => {
     panStart.y = sy;
     panOffStart.x = tOffX;
     panOffStart.y = tOffY;
-    return;
+
+    // actualiza HUD en el punto actual por claridad
+    const { ix, iy } = screenToImage(sx, sy);
+    updateCoordsHUD(ix, iy);
+    return; // no iniciamos caja
   }
 
   const { ix, iy } = screenToImage(sx, sy);
@@ -773,11 +828,15 @@ tCanvas.addEventListener('pointerdown', (e) => {
   tDrawing = true;
   tStartX = clamped.ix;
   tStartY = clamped.iy;
-  tPrevW = 0; tPrevH = 0;
+  tPrevW = 0; 
+  tPrevH = 0;
 
+  // muestra el punto de inicio en el HUD
+  updateCoordsHUD(clamped.ix, clamped.iy);
   scheduleRedraw();
 });
 
+// --- FIN DEL DIBUJO (crear caja y normalizar) ---
 function finishBox() {
   if (!tDrawing) return;
   tDrawing = false;
@@ -798,21 +857,46 @@ function finishBox() {
     tBoxes.push({ x, y, w, h, cls: clsIndex });
   }
 
-  tPrevW = tPrevH = 0;
+  tPrevW = 0; 
+  tPrevH = 0;
+
+  // refresca HUD con el cursor actual (en coords de imagen)
+  const { ix, iy } = screenToImage(tMouseX, tMouseY);
+  updateCoordsHUD(ix, iy);
+
   scheduleRedraw();
 }
 
+
+// --- POINTER UP (finaliza pan o caja) ---
 tCanvas.addEventListener('pointerup', () => {
   try { if (pointerId != null) tCanvas.releasePointerCapture(pointerId); } catch {}
   pointerId = null;
-  if (panning) { panning = false; scheduleRedraw(); return; }
+
+  if (panning) {
+    panning = false;
+    // al soltar, actualiza HUD con posición actual del cursor en la imagen
+    const { ix, iy } = screenToImage(tMouseX, tMouseY);
+    updateCoordsHUD(ix, iy);
+    scheduleRedraw();
+    return;
+  }
+
   finishBox();
 });
 
+// --- POINTER UP GLOBAL (por si se suelta fuera del canvas) ---
 window.addEventListener('pointerup', () => {
-  if (panning) { panning = false; scheduleRedraw(); }
-  else if (tDrawing) finishBox();
+  if (panning) {
+    panning = false;
+    const { ix, iy } = screenToImage(tMouseX, tMouseY);
+    updateCoordsHUD(ix, iy);
+    scheduleRedraw();
+  } else if (tDrawing) {
+    finishBox();
+  }
 });
+
 
 // Zoom centrado y estable en el punto del cursor
 function zoomAt(factor, cx, cy) {
