@@ -29,6 +29,16 @@ const stripScroll = document.getElementById('stripScroll');
 const imgFull     = document.getElementById('imgFull');
 const imgLightbox = document.getElementById('imgLightbox');
 
+// Class editor (opcionales: sólo si añadiste el modal y botones)
+const classEditor     = document.getElementById('classEditor');
+const classListEl     = document.getElementById('classList');
+const editClassesBtn  = document.getElementById('editClassesBtn');
+const addClassBtn     = document.getElementById('addClassBtn');
+const saveClassesBtn  = document.getElementById('saveClassesBtn');
+const resetPaletteBtn = document.getElementById('resetPaletteBtn');
+const newClassNameEl  = document.getElementById('newClassName');
+const newClassColorEl = document.getElementById('newClassColor');
+
 // Desactivar menú contextual para permitir pan con botón derecho
 tCanvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
@@ -62,6 +72,16 @@ let panOffStart = { x:0, y:0 };
 
 let DPR = 1;
 
+// ====== Clases con color ======
+let classMeta = []; // [{name, color}]
+const SUGGESTED_PALETTE = [
+  "#ff3b30","#ff9500","#ffcc00","#34c759",
+  "#00c7be","#30b0ff","#007aff","#5856d6",
+  "#af52de","#ff2d55","#64d2ff","#ffd60a"
+];
+function defaultColorForIndex(i){ return SUGGESTED_PALETTE[i % SUGGESTED_PALETTE.length]; }
+function getClassName(i){ return classMeta?.[i]?.name ?? String(i); }
+function getClassColor(i){ return classMeta?.[i]?.color ?? defaultColorForIndex(i); }
 
 // =======================================================
 // 3) UTILS CANVAS & DIBUJO
@@ -128,29 +148,32 @@ function drawCrosshair(x, y) {
   tCtx.restore();
 }
 
-
-// Obtener array de nombres de clase (index -> nombre)
-function getClassListArray(){
-  return Array.from(classSelect?.options || []).map(o=>o.value);
+// Colores
+function hexToRgba(hex, a=1){
+  const h = hex.replace('#','');
+  const full = h.length===3 ? h.split('').map(c=>c+c).join('') : h;
+  const bigint = parseInt(full, 16);
+  const r = (bigint >> 16) & 255;
+  const g = (bigint >> 8) & 255;
+  const b = bigint & 255;
+  return `rgba(${r},${g},${b},${a})`;
 }
 
 // Dibuja el texto centrado encima del bbox (usa coords de imagen -> pantalla)
-function drawCanvasLabelOnTop(b, text) {
+function drawCanvasLabelOnTop(b, text, color) {
   const cxImg = b.x + b.w / 2;  // centro horizontal de la caja
   const topImg = b.y;           // borde superior de la caja
-  drawCanvasLabel(cxImg, topImg, text, { align: 'center', margin: 4 });
+  drawCanvasLabel(cxImg, topImg, text, { align: 'center', margin: 4, color });
 }
 
 // Dibuja una etiqueta en pantalla a partir de coords de imagen
-function drawCanvasLabel(imgX, imgY, text, { align='left', margin=4 } = {}) {
-  // Convertimos a coords de pantalla (px de canvas, ya corregidos por DPR)
+function drawCanvasLabel(imgX, imgY, text, { align='left', margin=4, color='#000' } = {}) {
   const { sx, sy } = imageToScreen(imgX, imgY);
 
-  // Tipografía estable con zoom
   const base = 12;
   const fontPx = Math.max(10, base / tScale);
   tCtx.save();
-  tCtx.setTransform(1,0,0,1,0,0); // aseguramos NO hay transformaciones activas
+  tCtx.setTransform(1,0,0,1,0,0); // sin transformaciones activas
   tCtx.font = `${fontPx}px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`;
 
   const padX = 4 / tScale;
@@ -162,26 +185,24 @@ function drawCanvasLabel(imgX, imgY, text, { align='left', margin=4 } = {}) {
   const boxW = textW + padX * 2;
   const boxH = textH + padY * 2;
 
-  // Posición de la caja del label (encima del bbox, con margen)
   let boxX = sx;
   if (align === 'center') boxX = sx - boxW / 2;
   const boxY = sy - boxH - (margin / tScale);
 
-  // Fondo + borde
-  tCtx.fillStyle = 'rgba(0,0,0,0.7)';
-  tCtx.strokeStyle = 'rgba(255,255,255,0.85)';
-  tCtx.lineWidth = 1; // ya estamos en espacio pantalla
+  // Fondo + borde con color de clase
+  tCtx.fillStyle   = hexToRgba(color, 0.18);
+  tCtx.strokeStyle = color;
+  tCtx.lineWidth   = 1;
+
   tCtx.beginPath();
   tCtx.rect(boxX, boxY, boxW, boxH);
   tCtx.fill();
   tCtx.stroke();
 
-  // Texto
   tCtx.fillStyle = '#fff';
   tCtx.fillText(text, boxX + padX, boxY + padY + textH * 0.8);
   tCtx.restore();
 }
-
 
 function redrawTrain() {
   syncCanvasDPI();
@@ -192,7 +213,7 @@ function redrawTrain() {
     return;
   }
 
-  // 1) IMAGEN + CAJAS (en espacio de imagen)
+  // 1) IMAGEN + CAJAS (espacio imagen)
   tCtx.save();
   tCtx.translate(tOffX, tOffY);
   tCtx.scale(tScale, tScale);
@@ -200,12 +221,11 @@ function redrawTrain() {
   tCtx.drawImage(tImg, 0, 0);
 
   tCtx.lineWidth = 2 / tScale;
-  tCtx.strokeStyle = '#ff3b30';
   for (const b of tBoxes) {
+    tCtx.strokeStyle = getClassColor(b.cls);
     tCtx.strokeRect(b.x, b.y, b.w, b.h);
   }
 
-  // caja provisional mientras dibujas
   if (tDrawing) {
     tCtx.strokeStyle = 'lime';
     tCtx.strokeRect(tStartX, tStartY, tPrevW, tPrevH);
@@ -213,21 +233,20 @@ function redrawTrain() {
 
   tCtx.restore();
 
-  // 2) LABELS (en espacio de pantalla, sin transformaciones)
-  const labelNames = getClassListArray();
+  // 2) LABELS (pantalla)
   for (const b of tBoxes) {
-    const clsName = labelNames?.[b.cls] ?? String(b.cls ?? '');
-    if (clsName) drawCanvasLabelOnTop(b, clsName);
+    const name  = getClassName(b.cls);
+    const color = getClassColor(b.cls);
+    drawCanvasLabelOnTop(b, name, color);
   }
 
-  // 3) CROSSHAIR (pantalla)
+  // 3) CROSSHAIR
   drawCrosshair(tMouseX, tMouseY);
 
   hud.textContent = currentImage
     ? `img: ${currentImage} | zoom ${(tScale*100).toFixed(0)}% | cajas ${tBoxes.length}`
     : `(${currentSplit}) listo`;
 }
-
 
 // Centrar una miniatura en la vista del filmstrip
 function centerThumbInView(i) {
@@ -250,7 +269,7 @@ function setActiveThumbByIndex(i) {
     el.classList.toggle('active', k === i);
   });
   centerThumbInView(i);
-  updateStripScrollbar(); // mantener range sincronizado
+  updateStripScrollbar();
 }
 
 // =======================================================
@@ -284,7 +303,7 @@ function yoloToXYWH(label, iw, ih){
 }
 
 // ====== Overlays HTML (filmstrip y lightbox) ======
-function drawOverlayBoxes(container, img, boxesPx, {labelNames=[]}={}){
+function drawOverlayBoxes(container, img, boxesPx, {labelNames=[], colorsByIndex=null}={}){
   let overlay = container.querySelector('.bbox-layer');
   if(!overlay){
     overlay = document.createElement('div');
@@ -318,10 +337,17 @@ function drawOverlayBoxes(container, img, boxesPx, {labelNames=[]}={}){
     node.style.width  = `${bw}px`;
     node.style.height = `${bh}px`;
 
+    const color = colorsByIndex ? colorsByIndex[b.cls] : null;
+    if (color) {
+      node.style.borderColor = color;
+      node.style.boxShadow = `0 0 4px ${hexToRgba(color, .35)}`;
+    }
+
     const lbl = document.createElement('div');
     lbl.className = 'bbox-label';
     const clsName = (labelNames[b.cls] ?? String(b.cls));
     lbl.textContent = clsName;
+    if (color) lbl.style.background = color;
     node.appendChild(lbl);
 
     overlay.appendChild(node);
@@ -354,7 +380,9 @@ async function refreshThumbOverlay(name, split = currentSplit) {
   const iw = img.naturalWidth;
   const ih = img.naturalHeight;
   const boxesPx = labels.map(l => yoloToXYWH(l, iw, ih));
-  drawOverlayBoxes(el, img, boxesPx, { labelNames: getClassListArray() });
+  const colors = classMeta.map(c=>c.color);
+  const names  = classMeta.map(c=>c.name);
+  drawOverlayBoxes(el, img, boxesPx, { labelNames: names, colorsByIndex: colors });
 }
 
 // Refresca el overlay del lightbox si está abierto
@@ -368,20 +396,67 @@ async function refreshLightboxOverlay() {
   const ih = imgFull.naturalHeight || 0;
   const boxesPx = (iw && ih) ? labels.map(l => yoloToXYWH(l, iw, ih)) : [];
   const container = imgFull.closest('.modal-inner');
-  drawOverlayBoxes(container, imgFull, boxesPx, { labelNames: getClassListArray() });
+
+  const colors = classMeta.map(c=>c.color);
+  const names  = classMeta.map(c=>c.name);
+  drawOverlayBoxes(container, imgFull, boxesPx, { labelNames: names, colorsByIndex: colors });
 }
 
 // =======================================================
 // 5) CARGA DE CLASES E IMÁGENES
 // =======================================================
 async function loadClasses() {
-  const resp = await fetch('/annotate/classes');
-  const data = await resp.json();
+  // 1) intenta /annotate/classes_meta (nombre+color)
+  try{
+    const r = await fetch('/annotate/classes_meta', {cache:'no-store'});
+    if (r.ok) {
+      const data = await r.json(); // {classes:[{name,color},...]}
+      if (Array.isArray(data.classes)) {
+        classMeta = data.classes.map((c,i)=>({
+          name: String(c.name ?? `class_${i}`),
+          color: String(c.color ?? defaultColorForIndex(i))
+        }));
+        rebuildClassSelect();
+        localStorage.setItem('classMeta', JSON.stringify(classMeta));
+        return;
+      }
+    }
+  }catch{}
+
+  // 2) intenta /annotate/classes (sólo nombres)
+  try{
+    const r = await fetch('/annotate/classes', {cache:'no-store'});
+    if (r.ok) {
+      const data = await r.json(); // {classes:[str,...]}
+      const names = Array.isArray(data.classes) ? data.classes : [];
+      classMeta = names.map((name,i)=>({ name, color: defaultColorForIndex(i) }));
+      rebuildClassSelect();
+      localStorage.setItem('classMeta', JSON.stringify(classMeta));
+      return;
+    }
+  }catch{}
+
+  // 3) fallback localStorage
+  try{
+    const raw = localStorage.getItem('classMeta');
+    if (raw) {
+      classMeta = JSON.parse(raw);
+      rebuildClassSelect();
+      return;
+    }
+  }catch{}
+
+  // 4) último recurso
+  classMeta = [{name:'defecto', color:'#ff3b30'}];
+  rebuildClassSelect();
+}
+
+function rebuildClassSelect(){
   classSelect.innerHTML = '';
-  (data.classes || []).forEach((c, i) => {
+  classMeta.forEach((c, i) => {
     const opt = document.createElement('option');
-    opt.value = c;
-    opt.textContent = `${i} — ${c}`;
+    opt.value = c.name;
+    opt.textContent = `${i} — ${c.name}`;
     classSelect.appendChild(opt);
   });
 }
@@ -462,8 +537,8 @@ function buildFilmstrip(images) {
     const item = document.createElement('div');
     item.className = 'strip-thumb';
     item.title     = name;
-    item.dataset.name  = name;   // para refresh focalizado
-    item.dataset.split = split;  // para refresh focalizado
+    item.dataset.name  = name;
+    item.dataset.split = split;
 
     const img = document.createElement('img');
     img.loading = 'lazy';
@@ -484,12 +559,10 @@ function buildFilmstrip(images) {
       setActiveThumbByIndex(currentIndex);
     });
 
-    // doble click: abrir ampliación (lightbox) con cajas
-    item.addEventListener('dblclick', () => {
-      openPreview(name);
-    });
+    // doble click: abrir ampliación
+    item.addEventListener('dblclick', () => { openPreview(name); });
 
-    // pintar overlay en la miniatura al cargar
+    // overlay en miniatura
     const ensureOverlay = async () => {
       const labels = await fetchYoloLabels(split, name);
       if (!labels.length) return;
@@ -499,14 +572,16 @@ function buildFilmstrip(images) {
       if (!iw || !ih) return;
 
       const boxesPx = labels.map(l => yoloToXYWH(l, iw, ih));
-      drawOverlayBoxes(item, img, boxesPx, { labelNames: getClassListArray() });
+      const colors  = classMeta.map(c=>c.color);
+      const names   = classMeta.map(c=>c.name);
+      drawOverlayBoxes(item, img, boxesPx, { labelNames: names, colorsByIndex: colors });
     };
 
     if (img.complete && img.naturalWidth) ensureOverlay();
     else img.addEventListener('load', ensureOverlay);
   });
 
-  // Interacción “drag to scroll”
+  // drag-to-scroll
   stripTrack.addEventListener('mousedown', (e) => {
     fsDragging = true;
     stripTrack.classList.add('grabbing');
@@ -530,7 +605,7 @@ function buildFilmstrip(images) {
     updateStripScrollbar();
   });
 
-  // Scroll con rueda del ratón (horizontal)
+  // rueda horizontal
   stripTrack.addEventListener('wheel', (e) => {
     const delta = (Math.abs(e.deltaX) > Math.abs(e.deltaY)) ? e.deltaX : e.deltaY;
     stripTrack.scrollLeft += delta;
@@ -552,7 +627,7 @@ function scrollFilmstripPage(dir = 1) {
 stripPrev?.addEventListener('click', () => { goRelative(-1); scrollFilmstripPage(-1); });
 stripNext?.addEventListener('click', () => { goRelative(+1); scrollFilmstripPage(+1); });
 
-// ===== sincronización del range inferior =====
+// sincronización del range inferior
 function updateStripScrollbar(){
   if (!stripTrack || !stripScroll) return;
   const max = Math.max(0, stripTrack.scrollWidth - stripTrack.clientWidth);
@@ -593,13 +668,47 @@ function scheduleRedraw() {
 window.addEventListener('resize', () => {
   if (!tLoaded) { syncCanvasDPI(); scheduleRedraw(); return; }
   syncCanvasDPI();
-  // re-centrar imagen al nuevo tamaño
   fitToCanvas();
   scheduleRedraw();
 });
 
-// Split cambiado
-splitSelect.addEventListener('change', loadImageList);
+
+splitSelect.addEventListener('change', async () => {
+  await loadImageList();
+  if (!imageListCache.length) {
+    await ensureHasImages();
+  }
+});
+
+async function probeSplit(sp) {
+  const r = await fetch(`/annotate/images?split=${encodeURIComponent(sp)}`, {cache:'no-store'});
+  if (!r.ok) return { split: sp, images: [] };
+  const data = await r.json();
+  return { split: sp, images: data.images || [] };
+}
+
+async function ensureHasImages() {
+  // prioriza el valor actual y luego train/valid/test
+  const order = Array.from(new Set([splitSelect.value || 'train', 'train', 'valid', 'test']));
+  for (const sp of order) {
+    const { images } = await probeSplit(sp);
+    if (images.length > 0) {
+      if (splitSelect.value !== sp) {
+        splitSelect.value = sp;
+      }
+      await loadImageList(); // reconstruye filmstrip con ese split
+      hud.textContent = `(${sp}) ${images.length} imágenes`;
+      return true;
+    }
+  }
+  // ninguno tiene imágenes
+  stripTrack.innerHTML = '';
+  updateStripScrollbar();
+  tLoaded = false; tBoxes = []; redrawTrain();
+  hud.textContent = 'No hay imágenes en static/dataset/{train|valid|test}/images';
+  return false;
+}
+
 
 // Cargar actual
 loadImageBtn.addEventListener('click', () => {
@@ -611,8 +720,9 @@ let pointerId = null;
 
 tCanvas.addEventListener('pointermove', (e) => {
   const r = tCanvas.getBoundingClientRect();
-  tMouseX = (e.clientX - r.left) * DPR;  // ← antes: sin *DPR
-  tMouseY = (e.clientY - r.top)  * DPR;  // ← antes: sin *DPR
+  tMouseX = (e.clientX - r.left) * DPR;
+  tMouseY = (e.clientY - r.top)  * DPR;
+
   if (panning) {
     const dx = tMouseX - panStart.x;
     const dy = tMouseY - panStart.y;
@@ -642,7 +752,7 @@ tCanvas.addEventListener('pointerdown', (e) => {
   const sx = (e.clientX - r.left) * DPR;
   const sy = (e.clientY - r.top)  * DPR;
 
-  // PAN con botón central (1), derecho (2) o con modificadores (Shift/Ctrl/Alt/Cmd/Espacio)
+  // PAN con botón central/derecho o modificadores
   const wantsPan =
     (e.button === 1) ||
     (e.button === 2) ||
@@ -654,7 +764,7 @@ tCanvas.addEventListener('pointerdown', (e) => {
     panStart.y = sy;
     panOffStart.x = tOffX;
     panOffStart.y = tOffY;
-    return; // no iniciamos caja
+    return;
   }
 
   const { ix, iy } = screenToImage(sx, sy);
@@ -692,7 +802,7 @@ function finishBox() {
   scheduleRedraw();
 }
 
-tCanvas.addEventListener('pointerup', (e) => {
+tCanvas.addEventListener('pointerup', () => {
   try { if (pointerId != null) tCanvas.releasePointerCapture(pointerId); } catch {}
   pointerId = null;
   if (panning) { panning = false; scheduleRedraw(); return; }
@@ -727,14 +837,12 @@ tCanvas.addEventListener('wheel', (e) => {
   e.preventDefault();
 
   if (e.shiftKey) {
-    // Pan fino con rueda: desplaza offsets en px de pantalla
     tOffY -= e.deltaY;
     tOffX -= e.deltaX;
     scheduleRedraw();
     return;
   }
 
-  // Zoom centrado en el cursor
   const factor = e.deltaY < 0 ? 1.1 : 1/1.1;
   zoomAt(factor, tMouseX, tMouseY);
 }, { passive: false });
@@ -758,7 +866,6 @@ saveAnnBtn?.addEventListener('click', async () => {
 
   if (resp.ok) {
     alert(`Etiquetas guardadas: ${data.saved}`);
-    // Refresca overlay de la miniatura actual y lightbox si procede
     await refreshThumbOverlay(currentImage, currentSplit);
     await refreshLightboxOverlay();
   } else {
@@ -797,7 +904,10 @@ function openPreview(name){
     const ih = imgFull.naturalHeight || 0;
     const boxesPx = (iw && ih) ? labels.map(l => yoloToXYWH(l, iw, ih)) : [];
     const container = imgFull.closest('.modal-inner');
-    drawOverlayBoxes(container, imgFull, boxesPx, { labelNames: getClassListArray() });
+
+    const colors = classMeta.map(c=>c.color);
+    const names  = classMeta.map(c=>c.name);
+    drawOverlayBoxes(container, imgFull, boxesPx, { labelNames: names, colorsByIndex: colors });
   };
 
   if (imgFull.complete && imgFull.naturalWidth) afterLoad();
@@ -811,12 +921,100 @@ tCanvas.addEventListener('dblclick', () => {
 });
 
 // =======================================================
-// 9) INIT
+// 9) EDITOR DE CLASES (UI + persistencia)
+// =======================================================
+
+function renderClassRows(){
+  if (!classListEl) return;
+  classListEl.innerHTML = '';
+  classMeta.forEach((c,i)=>{
+    const row = document.createElement('div');
+    row.className = 'class-row';
+    row.innerHTML = `
+      <div class="drag" title="(pendiente) arrastrar">⋮⋮</div>
+      <div class="idx">${i}</div>
+      <input type="text" value="${c.name}" placeholder="Nombre de clase">
+      <input type="color" value="${c.color}" title="Color">
+      <button class="del" title="Eliminar">−</button>
+    `;
+    const els = row.querySelectorAll('input,button');
+    const nameInput  = els[0];
+    const colorInput = els[1];
+    const delBtn     = els[2];
+
+    nameInput.addEventListener('input', ()=>{ classMeta[i].name  = nameInput.value.trim() || `class_${i}`; });
+    colorInput.addEventListener('input', ()=>{ classMeta[i].color = colorInput.value; redrawTrain(); });
+    delBtn.addEventListener('click', ()=>{
+      classMeta.splice(i,1);
+      renderClassRows();
+      rebuildClassSelect();
+      redrawTrain();
+      if (currentImage) { refreshThumbOverlay(currentImage, currentSplit); refreshLightboxOverlay(); }
+    });
+
+    classListEl.appendChild(row);
+  });
+}
+
+function closeClassEditor(e){
+  e?.stopPropagation?.();
+  classEditor?.classList.add('hidden');
+}
+
+async function saveClassMeta(){
+  const payload = { classes: classMeta };
+  try{
+    const r = await fetch('/annotate/classes_meta', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(payload)
+    });
+    if (r.ok) {
+      localStorage.setItem('classMeta', JSON.stringify(classMeta));
+      alert('Clases guardadas.');
+      return true;
+    }
+  }catch{}
+  localStorage.setItem('classMeta', JSON.stringify(classMeta));
+  alert('Clases guardadas localmente (configura /annotate/classes_meta en el backend).');
+  return false;
+}
+
+// Wire-up botones del editor (si existen en el DOM)
+editClassesBtn?.addEventListener('click', () => {
+  renderClassRows();
+  classEditor?.classList.remove('hidden');
+});
+saveClassesBtn?.addEventListener('click', async ()=>{
+  await saveClassMeta();
+  renderClassRows();
+  rebuildClassSelect();
+  redrawTrain();
+  if (currentImage) { refreshThumbOverlay(currentImage, currentSplit); refreshLightboxOverlay(); }
+});
+addClassBtn?.addEventListener('click', ()=>{
+  const name  = (newClassNameEl?.value || '').trim() || `class_${classMeta.length}`;
+  const color = newClassColorEl?.value || defaultColorForIndex(classMeta.length);
+  classMeta.push({ name, color });
+  if (newClassNameEl) newClassNameEl.value = '';
+  renderClassRows();
+  rebuildClassSelect();
+  redrawTrain();
+});
+resetPaletteBtn?.addEventListener('click', ()=>{
+  classMeta = classMeta.map((c,i)=>({ ...c, color: defaultColorForIndex(i) }));
+  renderClassRows();
+  redrawTrain();
+});
+classEditor?.addEventListener('click', (e)=>{ if (e.target === classEditor) closeClassEditor(e); });
+
+// =======================================================
+// 10) INIT
 // =======================================================
 window.addEventListener('DOMContentLoaded', async () => {
   syncCanvasDPI();
   await loadClasses();
-  await loadImageList();            // construye filmstrip y auto-carga
-  initStripScrollbarSync();         // activar sincronización range <-> scroll
+  await loadImageList();            // intenta el split actual
+  await ensureHasImages();          // si está vacío, auto-cambia a uno con imágenes
+  initStripScrollbarSync();
   scheduleRedraw();
 });

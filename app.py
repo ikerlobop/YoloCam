@@ -793,35 +793,48 @@ def _resolve_classes_file():
 
 CLASSES_FILE = _resolve_classes_file()
 
+def _classes_json_path() -> str:
+    """Ruta a classes.json, junto a classes.txt (misma carpeta)."""
+    base_dir = os.path.dirname(_resolve_classes_file())
+    return os.path.join(base_dir, "classes.json")
 
-def _dataset_images(split: str):
-    split = (split or "train").lower()
-    img_dir = os.path.join(app.static_folder, "dataset", split, "images")
-    if not os.path.isdir(img_dir):
-        return []
-    return sorted([f for f in os.listdir(img_dir) if f.lower().endswith((".jpg", ".jpeg", ".png"))])
+def _read_classes_json() -> Optional[dict]:
+    path = _classes_json_path()
+    if not os.path.isfile(path):
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            return json.load(fh)
+    except Exception as e:
+        print(f"[WARN] No se pudo leer classes.json: {e}")
+        return None
 
+def _write_classes_json(data: dict):
+    path = _classes_json_path()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(data, fh, ensure_ascii=False, indent=2)
 
-@app.route("/annotate/images")
-@login_required
-def annotate_images():
-    split = request.args.get("split", "train").lower()
-    items = _dataset_images(split)
-    return jsonify({"split": split, "images": items})
-
+def _write_classes_txt(names: List[str]):
+    """Sobrescribe classes.txt con una clase por línea."""
+    path = _resolve_classes_file()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as fh:
+        for n in names:
+            n = (n or "").strip()
+            if n:
+                fh.write(n + "\n")
 
 def _classes_list():
     """Lee classes.txt desde la ruta resuelta dinámicamente.
     Si no existe, devuelve [].
     """
     global CLASSES_FILE
-    # re-resolver por si el archivo aparece después de arrancar
     CLASSES_FILE = _resolve_classes_file()
     if not os.path.isfile(CLASSES_FILE):
         return []
     with open(CLASSES_FILE, "r", encoding="utf-8") as fh:
         return [l.strip() for l in fh if l.strip()]
-
 
 @app.route("/annotate/classes")
 @login_required
@@ -844,6 +857,100 @@ def annotate_classes():
         "exists": exists,
         "mtime": mtime
     })
+
+# --------- NUEVO: clases con color (JSON) ---------
+
+@app.route("/annotate/classes_meta", methods=["GET"])
+@login_required
+def classes_meta_get():
+    """
+    Devuelve: { "classes": [ { "name": "...", "color": "#RRGGBB" }, ... ],
+                "path_txt": "<ruta classes.txt>", "path_json": "<ruta classes.json>" }
+    Si classes.json no existe, se infiere desde classes.txt con una paleta por defecto.
+    """
+    txt_path = _resolve_classes_file()
+    json_path = _classes_json_path()
+
+    data = _read_classes_json()
+    if not data or "classes" not in data:
+        names = _classes_list()
+        classes = []
+        for i, n in enumerate(names):
+            color = SUGGESTED_PALETTE[i % len(SUGGESTED_PALETTE)]
+            classes.append({"name": n, "color": color})
+        data = {"classes": classes}
+
+    return jsonify({
+        "classes": data.get("classes", []),
+        "path_txt": txt_path,
+        "path_json": json_path
+    })
+
+@app.route("/annotate/classes_meta", methods=["POST"])
+@login_required
+def classes_meta_post():
+    """
+    Espera: { "classes": [ { "name": "grieta", "color": "#ff3b30" }, ... ] }
+    Efectos:
+      - Guarda classes.json (nombre+color)
+      - Reescribe classes.txt con los nombres (una línea por clase)
+    """
+    payload = request.get_json(silent=True) or {}
+    items = payload.get("classes")
+    if not isinstance(items, list) or not items:
+        return jsonify({"error": "payload inválido; se requiere 'classes' (lista)"}), 400
+
+    # Normaliza lista y valida color (simple)
+    normalized = []
+    names = []
+    for i, it in enumerate(items):
+        name = str(it.get("name", "")).strip()
+        color = str(it.get("color", "")).strip() or SUGGESTED_PALETTE[i % len(SUGGESTED_PALETTE)]
+        if not name:
+            return jsonify({"error": f"nombre vacío en índice {i}"}), 400
+        # Validación rápida de color #RRGGBB/#RGB
+        if not (color.startswith("#") and len(color) in (4, 7)):
+            return jsonify({"error": f"color inválido en índice {i}: {color}"}), 400
+        normalized.append({"name": name, "color": color})
+        names.append(name)
+
+    # Persistir JSON + TXT
+    try:
+        _write_classes_json({"classes": normalized})
+        _write_classes_txt(names)
+    except Exception as e:
+        return jsonify({"error": f"no se pudo guardar clases: {e}"}), 500
+
+    return jsonify({
+        "status": "ok",
+        "saved_json": _classes_json_path(),
+        "saved_txt": _resolve_classes_file(),
+        "count": len(normalized)
+    })
+
+# Paleta por defecto para /annotate/classes_meta GET (reutilizamos la del front)
+SUGGESTED_PALETTE = [
+    "#ff3b30","#ff9500","#ffcc00","#34c759",
+    "#00c7be","#30b0ff","#007aff","#5856d6",
+    "#af52de","#ff2d55","#64d2ff","#ffd60a"
+]
+
+def _dataset_images(split: str):
+    """Devuelve la lista de nombres de imagen en static/dataset/<split>/images."""
+    split = (split or "train").lower()
+    img_dir = os.path.join(app.static_folder, "dataset", split, "images")
+    if not os.path.isdir(img_dir):
+        return []
+    return sorted(
+        [f for f in os.listdir(img_dir) if f.lower().endswith((".jpg", ".jpeg", ".png"))]
+    )
+
+@app.route("/annotate/images")
+@login_required
+def annotate_images():
+    split = (request.args.get("split") or "train").lower()
+    items = _dataset_images(split)            # devuelve sólo los NOMBRES de archivo
+    return jsonify({"split": split, "images": items})
 
 
 @app.route("/annotate/save", methods=["POST"])

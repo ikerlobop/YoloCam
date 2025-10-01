@@ -1,0 +1,16 @@
+{
+  "classes": [
+    {
+      "name": "grieta",
+      "color": "#ff3b30"
+    },
+    {
+      "name": "hendidura",
+      "color": "#ff9500"
+    },
+    {
+      "name": "rotura",
+      "color": "#ae91fd"
+    }
+  ]
+}

@@ -97,7 +97,7 @@ body{
 .logout-btn:hover{background:#161c26;border-color:#2a3242}
 
 /* ========== CONTENIDO PRINCIPAL / TRAINING VIEW ========== */
-.train-page{display:flex;flex-direction:column;gap:12px;height:100vh;padding:12px}
+.train-page{display:flex;flex-direction:column;gap:10px;height:100vh;padding:12px}
 .train-topbar{
   background:var(--panel);
   padding:10px 14px;display:flex;gap:12px;align-items:center;border:1px solid var(--border);
@@ -113,7 +113,7 @@ body{
 .train-canvas-wrap{
   flex:0 0 auto;
   height: clamp(300px, 54vh, 62vh);  /* ← más compacto y adaptable */
-  min-height: 300px;
+  min-height: 200px;
   display:flex; align-items:center; justify-content:center;
   background:#111; border:1px solid #2a2a35; border-radius:8px;
   padding:8px; margin-bottom:12px; overflow:hidden;
@@ -368,3 +368,17 @@ body{
 .strip-track::-webkit-scrollbar{height:8px}
 .strip-track::-webkit-scrollbar-thumb{background:#1c2330;border-radius:6px}
 
+.class-row{
+  display:flex; align-items:center; gap:8px;
+  background:var(--panel); border:1px solid var(--border);
+  border-radius:8px; padding:8px;
+}
+.class-row input[type="text"]{
+  flex:1; padding:8px; border-radius:6px; border:1px solid var(--border);
+  background:#0c1118; color:var(--text);
+}
+.class-row .drag{cursor:grab; opacity:.7; user-select:none; padding:0 6px;}
+.class-row .idx{width:34px; text-align:center; opacity:.7}
+.class-row .del{min-width:34px; height:34px; border-radius:8px; cursor:pointer;
+  border:1px solid var(--border); background:#2a2f3a; color:#fff; font-weight:800;}
+.class-row .del:hover{background:#333b49}

@@ -36,6 +36,7 @@
           <!-- Clase -->
           <label for="classSelect">Clase:</label>
           <select id="classSelect" style="min-width:180px;"></select>
+          <button id="editClassesBtn" class="btn-small btn-secondary">Editar clases</button>
 
           <!-- Herramientas -->
           <button id="zoomInBtn" class="btn-small">+</button>
@@ -53,12 +54,10 @@
 
       <!-- Canvas principal -->
       <div class="train-canvas-wrap">
-        <canvas id="trainCanvas" width="960" height="640"></canvas>
+        <canvas id="trainCanvas" ></canvas>
       </div>
     </div>
-  </div>
-
-  <div class="filmstrip">
+      <div class="filmstrip">
     <button class="strip-btn" id="stripPrev" title="Anterior">◀</button>
     <div class="strip-view">
       <div id="stripTrack" class="strip-track"></div>
@@ -66,6 +65,8 @@
     </div>
     <button class="strip-btn" id="stripNext" title="Siguiente">▶</button>
   </div>
+  </div>
+
   <!-- Lightbox / Ampliación con overlay para bboxes -->
   <div id="imgLightbox" class="modal hidden" onclick="closePreview(event)">
     <div class="modal-inner">
@@ -76,7 +77,26 @@
     </div>
   </div>
 
-  <!-- JS -->
+      <!-- JS -->
+      <div id="classEditor" class="modal hidden" role="dialog" aria-modal="true" onclick="closeClassEditor(event)">
+      <div class="modal-inner" style="min-width:520px" onclick="event.stopPropagation()">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+          <h3 style="margin:0;font-size:16px">Clases &amp; Colores</h3>
+          <button class="modal-close" onclick="closeClassEditor(event)">×</button>
+        </div>
+
+        <div id="classList" style="display:flex;flex-direction:column;gap:8px;"></div>
+
+        <div style="display:flex;gap:8px;margin-top:12px;">
+          <input id="newClassName" type="text" placeholder="Nueva clase..." style="flex:1;padding:8px;border-radius:6px;border:1px solid var(--border);background:#0c1118;color:var(--text)">
+          <input id="newClassColor" type="color" value="#ff3b30" style="width:46px;height:38px;border:none;background:transparent;cursor:pointer">
+          <button id="addClassBtn" class="btn-small">Añadir</button>
+          <div class="spacer"></div>
+          <button id="resetPaletteBtn" class="btn-small btn-secondary" title="Aplicar paleta sugerida">Paleta</button>
+          <button id="saveClassesBtn" class="btn-small success">Guardar</button>
+        </div>
+      </div>
+    </div>
   <script src="{{ url_for('static', filename='js/training.js') }}"></script>
 </body>
 </html>
