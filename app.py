@@ -1250,6 +1250,67 @@ def open_folder(split):
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+# ====== ELIMINACIÓN DE IMÁGENES DEL DATASET ======
+@app.route("/dataset/delete/<split>", methods=["DELETE"])
+@login_required
+def dataset_delete(split):
+    """Endpoint para eliminar imágenes del split indicado.
+    Body JSON: {"images": ["img1.jpg", "img2.jpg", ...]}
+    """
+    split = (split or "").lower()
+    if split not in ("train", "valid", "test"):
+        return jsonify(ok=False, error="split inválido"), 400
+
+    data = request.get_json(silent=True) or {}
+    image_names = data.get("images", [])
+    
+    if not image_names:
+        return jsonify(ok=False, error="No se especificaron imágenes para eliminar"), 400
+
+    images_path = os.path.join(DATASET_ROOT, split, "images")
+    labels_path = os.path.join(DATASET_ROOT, split, "labels")
+    
+    deleted_images = 0
+    deleted_labels = 0
+    errors = []
+
+    for image_name in image_names:
+        # Validar nombre seguro
+        safe_name = secure_filename(image_name)
+        if not safe_name or safe_name != image_name:
+            errors.append(f"Nombre de archivo inválido: {image_name}")
+            continue
+
+        # Eliminar imagen
+        image_path = os.path.join(images_path, image_name)
+        if os.path.exists(image_path):
+            try:
+                os.remove(image_path)
+                deleted_images += 1
+            except Exception as e:
+                errors.append(f"Error eliminando imagen {image_name}: {e}")
+        else:
+            errors.append(f"Imagen no encontrada: {image_name}")
+
+        # Eliminar etiqueta (si existe)
+        stem, _ = os.path.splitext(image_name)
+        label_name = f"{stem}.txt"
+        label_path = os.path.join(labels_path, label_name)
+        if os.path.exists(label_path):
+            try:
+                os.remove(label_path)
+                deleted_labels += 1
+            except Exception as e:
+                errors.append(f"Error eliminando etiqueta {label_name}: {e}")
+
+    return jsonify({
+        "ok": True,
+        "message": f"Eliminadas {deleted_images} imágenes y {deleted_labels} etiquetas",
+        "deleted_images": deleted_images,
+        "deleted_labels": deleted_labels,
+        "errors": errors
+    })
+
 
 # ----------------- MAIN -----------------
 if __name__ == "__main__":
