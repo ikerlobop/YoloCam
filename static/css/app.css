@@ -223,6 +223,11 @@ body{
 .btn-secondary:hover{background:#21293a}
 .btn-warn{background:var(--warn);border-color:#de8d05;color:#1b1306}
 .btn-danger{background:var(--danger);border-color:#b42318}
+.btn-success{ background:var(--ok); border-color:#128a3f; color:#09140c }
+.btn-success:hover{ background:#128a3f; }
+.btn-warn{ background:var(--warn); border-color:#de8d05; color:#1b1306 }
+.btn-danger{ background:var(--danger); border-color:#b42318 }
+
 
 /* ========== MODAL / LIGHTBOX ========== */
 .modal{

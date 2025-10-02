@@ -70,6 +70,7 @@ state = {
     "error": None,
     "layer_current": 0,
     "layer_total": LAYER_TOTAL,
+    "cancel": False
 }
 lock = threading.Lock()
 
@@ -176,6 +177,7 @@ def logout():
 
 # ----------------- SISTEMA -----------------
 @app.route("/system")
+@login_required
 def get_system_info():
     cpu_percent = psutil.cpu_percent(interval=None)
     ram = psutil.virtual_memory()
@@ -461,6 +463,23 @@ def capture_loop():
 
         slot_idx = 0
         while slot_idx < TOTAL_SLOTS:
+            # --- CANCELACIÓN: salir limpio si se solicita ---
+            with lock:
+                if state.get("cancel"):
+                    state["running"] = False
+                    state["stopped"] = True
+                    # empaquetar lo que haya si ya existen imágenes
+                    pending = len(state["images"]) > 0
+            if 'pending' in locals() and pending:
+                try:
+                    bundle_layer_assets(layer_id)
+                except Exception as e:
+                    print(f"[WARN] bundle (on cancel) layer {layer_id}: {e}")
+            if 'pending' in locals() and state.get("stopped"):
+                break
+
+            # --- fin cancelación ---
+
             with lock:
                 if len(state["images"]) >= TOTAL_SLOTS:
                     state["running"] = False
@@ -532,6 +551,7 @@ def index():
 
 
 @app.route("/state")
+@login_required
 def get_state():
     with lock:
         names = list(state["images"])
@@ -561,6 +581,7 @@ def get_state():
 
 
 @app.route("/layers")
+@login_required
 def get_layers():
     with lock:
         return jsonify({
@@ -592,7 +613,10 @@ def start_capture():
 @login_required
 def reset_capture():
     with lock:
-        state.update({"images": [], "running": False, "stopped": False, "error": None})
+        state["cancel"] = True
+    time.sleep(0.05)  # microyield
+    with lock:
+        state.update({"images": [], "running": False, "stopped": False, "error": None, "cancel": False})
     return jsonify({"status": "reset_done"})
 
 

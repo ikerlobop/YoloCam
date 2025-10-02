@@ -144,32 +144,23 @@ function getOrCreateBBoxLayerForImg(cell, img) {
   return { layer, left: offsetX, top: offsetY, width: dispW, height: dispH };
 }
 
-function drawBoxesOnLayer(layer, boxes) {
-  if (!boxes || !boxes.length) return;
+function drawBoxesOnLayer(layer, boxes, paletteByClass = {}) {
   for (const b of boxes) {
-    const xc = b.xc ?? 0.5;
-    const yc = b.yc ?? 0.5;
-    const w  = b.w  ?? 0.0;
-    const h  = b.h  ?? 0.0;
-
-    const left = (xc - w/2) * 100;
-    const top  = (yc - h/2) * 100;
-
+    const color = paletteByClass[b.cls] || 'var(--accent)';
     const box = document.createElement('div');
     box.className = 'bbox';
-    box.style.left = left + '%';
-    box.style.top = top + '%';
-    box.style.width = (w * 100) + '%';
-    box.style.height = (h * 100) + '%';
-
+    box.style.borderColor = color;
     const label = document.createElement('div');
     label.className = 'bbox-label';
+    label.style.background = color;
     label.textContent = (typeof b.cls === 'number' ? `C${b.cls}` : '');
     box.appendChild(label);
-
     layer.appendChild(box);
+    // …posicionamiento igual que ahora…
   }
 }
+
+
 
 function drawBoxesForCellWhenReady(cell, img, boxes) {
   const draw = () => {
@@ -182,6 +173,11 @@ function drawBoxesForCellWhenReady(cell, img, boxes) {
     img.addEventListener('load', draw, { once: true });
   }
 }
+
+let _palette = {};
+fetch('/annotate/classes_meta').then(r=>r.json()).then(j=>{
+  j.classes?.forEach((c,idx)=>{ _palette[idx]=c.color; });
+});
 
 // ======= Helpers de overlay para Lightbox =======
 function _computeContainRect(containerEl, imgEl) {
@@ -494,7 +490,9 @@ async function startCapture() {
     if (data.status === 'started' || data.status === 'already_running') {
       if (startBtn) { startBtn.textContent = 'Arrancar Captura'; }
       await bootPollingIfNeeded();
-      await loadLibraryForSelectedLayer();   // refresca biblioteca por capa
+      await loadLibraryForSelectedLayer(); 
+      startSheetWatcher();  // arranca vigilancia de hoja
+      // refresca biblioteca por capa
     } else {
       if (startBtn) { startBtn.textContent = '❌ Error'; startBtn.disabled = false; }
     }
@@ -516,8 +514,13 @@ async function resetCapture() {
 
     if (data.status === 'reset_done') {
       stopPolling();
+      stopSheetWatcher(); 
       clearGrid();
-      await loadLibraryForSelectedLayer();
+      
+      await loadLibraryForSelectedLayer();      
+      if (sheetFinal) sheetFinal.classList.add('hidden');
+      if (sheetCanvas) sheetCanvas.classList.remove('hidden');
+      if (sheetStatus) sheetStatus.textContent = 'Lámina: en espera';
       if (startBtn) { startBtn.disabled = false; startBtn.textContent = 'Arrancar Captura'; }
       if (resetBtn) { resetBtn.textContent = 'Reset'; }
     } else {
@@ -836,6 +839,25 @@ const sheetStatus = document.getElementById('layerSheetStatus');
 
 let sheetLayerId  = 0;
 let sheetTimer    = null;
+let sheetWatching = false;
+let lastWatchedLayer = 0;
+
+function startSheetWatcher() {
+  if (sheetTimer) return;
+  sheetTimer = setInterval(tickLayerSheet, 1000);
+  sheetWatching = true;
+  // primer tick inmediato
+  tickLayerSheet();
+}
+
+function stopSheetWatcher() {
+  if (sheetTimer) {
+    clearInterval(sheetTimer);
+    sheetTimer = null;
+  }
+  sheetWatching = false;
+}
+
 
 // Ajusta tamaño lógico del canvas al layout (mantener múltiplos de TILE)
 function resizeSheetCanvas() {
@@ -933,6 +955,7 @@ async function checkFinalSheet(layerId) {
 
 // Bucle de actualización: lee /layers, /state y decide qué mostrar
 async function tickLayerSheet() {
+  if (!sheetWatching) return;
   try {
     // 1) Capa actual
     const lr = await fetch('/layers', { cache: 'no-store' });
@@ -943,15 +966,24 @@ async function tickLayerSheet() {
     const finalUrl = await checkFinalSheet(sheetLayerId);
 
     if (finalUrl) {
-      // Mostrar imagen final y ocultar canvas live
-      if (sheetFinal) {
+    // Mostrar imagen final y ocultar canvas live
+    if (sheetFinal) {
+      // Evita volver a recargar la misma imagen si ya la estamos mostrando
+      const cleanSrc = sheetFinal.src.split('?')[0];
+      if (!cleanSrc.endsWith(`/layer_${sheetLayerId}.jpg`)) {
         sheetFinal.src = finalUrl;
-        sheetFinal.classList.remove('hidden');
       }
-      if (sheetCanvas) sheetCanvas.classList.add('hidden');
-      if (sheetStatus) sheetStatus.textContent = `Lámina final generada — capa ${sheetLayerId}`;
-      return;
+      sheetFinal.classList.remove('hidden');
     }
+    if (sheetCanvas) sheetCanvas.classList.add('hidden');
+    if (sheetStatus) sheetStatus.textContent = `Lámina final generada — capa ${sheetLayerId}`;
+
+    // ⚠️ Paramos watcher: ya no tiene sentido seguir pidiendo /layers + HEAD/GET
+    stopSheetWatcher();
+    lastWatchedLayer = sheetLayerId;
+    return;
+}
+
 
     // 3) No existe final: pintar live desde el grid actual (/state.images)
     const sr = await fetch('/state', { cache: 'no-store' });
@@ -974,8 +1006,9 @@ window.addEventListener('DOMContentLoaded', () => {
   resizeSheetCanvas();
   window.addEventListener('resize', resizeSheetCanvas);
   // refresco suave: 1s. Puedes subir/bajar.
-  sheetTimer = setInterval(tickLayerSheet, 1000);
-  tickLayerSheet();
+  // sheetTimer = setInterval(tickLayerSheet, 1000);
+  // tickLayerSheet();
+  stopSheetWatcher();
 });
 const deleteSheetBtn = document.getElementById('deleteSheetBtn');
 deleteSheetBtn?.addEventListener('click', async () => {

@@ -1,14 +1,169 @@
+// =========================
+// Dataset Browser + BBoxes
+// =========================
+
 let currentSplit = null;
 let currentIndex = 0;
 const datasetCache = { train: [], valid: [], test: [] };
 
+// ====== Clases con color (como Training) ======
+let classMeta = []; // [{name, color}]
+const SUGGESTED_PALETTE = [
+  "#ff3b30","#ff9500","#ffcc00","#34c759",
+  "#00c7be","#30b0ff","#007aff","#5856d6",
+  "#af52de","#ff2d55","#64d2ff","#ffd60a"
+];
+const defaultColorForIndex = (i)=> SUGGESTED_PALETTE[i % SUGGESTED_PALETTE.length];
+const getClassName  = (i)=> classMeta?.[i]?.name  ?? String(i);
+const getClassColor = (i)=> classMeta?.[i]?.color ?? defaultColorForIndex(i);
+
+async function loadClassesMetaOnce(){
+  try{
+    const r = await fetch('/annotate/classes_meta', {cache:'no-store'});
+    if (r.ok) {
+      const data = await r.json();
+      if (Array.isArray(data.classes) && data.classes.length) {
+        classMeta = data.classes.map((c,i)=>({
+          name: String(c.name ?? `class_${i}`),
+          color: String(c.color ?? defaultColorForIndex(i))
+        }));
+        return;
+      }
+    }
+  }catch{}
+  // Fallback a /annotate/classes (solo nombres)
+  try{
+    const r = await fetch('/annotate/classes', {cache:'no-store'});
+    if (r.ok) {
+      const data = await r.json();
+      const names = Array.isArray(data.classes) ? data.classes : [];
+      classMeta = names.map((n,i)=>({ name:n, color: defaultColorForIndex(i) }));
+      return;
+    }
+  }catch{}
+  // Último recurso
+  classMeta = [{name:'defecto', color:'#ff3b30'}];
+}
+
+// ====== YOLO helpers (como Training) ======
+function buildLabelUrl(split, imageName){
+  const stem = imageName.replace(/\.[^.]+$/, '');
+  return `/static/dataset/${split}/labels/${encodeURIComponent(stem)}.txt`;
+}
+
+async function fetchYoloLabels(split, imageName){
+  try{
+    const res = await fetch(buildLabelUrl(split, imageName), {cache:'no-store'});
+    if (!res.ok) return [];
+    const txt = await res.text();
+    return txt
+      .split(/\r?\n/).map(l=>l.trim()).filter(Boolean)
+      .map(l => {
+        const [cls, cx, cy, w, h] = l.split(/[\s,]+/).map(Number);
+        return { cls, cx, cy, w, h };
+      });
+  }catch{ return []; }
+}
+
+function yoloToXYWH(label, iw, ih){
+  return {
+    x: (label.cx - label.w/2) * iw,
+    y: (label.cy - label.h/2) * ih,
+    w: label.w * iw,
+    h: label.h * ih,
+    cls: label.cls
+  };
+}
+
+// ====== Overlay genérico (igual a Training) ======
+function hexToRgba(hex, a=1){
+  const h = hex.replace('#','');
+  const full = h.length===3 ? h.split('').map(c=>c+c).join('') : h;
+  const n = parseInt(full,16);
+  const r = (n>>16)&255, g = (n>>8)&255, b = n&255;
+  return `rgba(${r},${g},${b},${a})`;
+}
+
+/**
+ * Dibuja boxes dentro de `container` ajustándose como object-fit: contain
+ * - container: nodo contenedor (debe ser position:relative)
+ * - img: <img> ya cargado
+ * - boxesPx: [{x,y,w,h,cls}] en píxeles de la imagen original
+ * - opts: {labelNames:string[], colorsByIndex:string[]}
+ */
+function drawOverlayBoxes(container, img, boxesPx, {labelNames=[], colorsByIndex=null}={}){
+  if (!img.naturalWidth || !img.naturalHeight) return;
+
+  let overlay = container.querySelector('.bbox-layer');
+  if (!overlay){
+    overlay = document.createElement('div');
+    overlay.className = 'bbox-layer';
+    container.appendChild(overlay);
+  }
+  overlay.innerHTML = '';
+
+  const cw = container.clientWidth, ch = container.clientHeight;
+  const iw = img.naturalWidth,  ih = img.naturalHeight;
+  const scale = Math.min(cw/iw, ch/ih);
+  const dispW = iw*scale, dispH = ih*scale;
+  const offX = (cw - dispW)/2;
+  const offY = (ch - dispH)/2;
+
+  overlay.style.left = offX + 'px';
+  overlay.style.top  = offY + 'px';
+  overlay.style.width  = dispW + 'px';
+  overlay.style.height = dispH + 'px';
+
+  boxesPx.forEach(b=>{
+    const bx = b.x * scale, by = b.y * scale, bw = b.w * scale, bh = b.h * scale;
+
+    const node = document.createElement('div');
+    node.className = 'bbox';
+    node.style.left   = `${bx}px`;
+    node.style.top    = `${by}px`;
+    node.style.width  = `${bw}px`;
+    node.style.height = `${bh}px`;
+
+    const color = colorsByIndex ? colorsByIndex[b.cls] : null;
+    if (color){
+      node.style.borderColor = color;
+      node.style.boxShadow = `0 0 4px ${hexToRgba(color,.35)}`;
+    }
+
+    const lbl = document.createElement('div');
+    lbl.className = 'bbox-label';
+    const clsName = (labelNames[b.cls] ?? String(b.cls));
+    lbl.textContent = clsName;
+    if (color) lbl.style.background = color;
+    node.appendChild(lbl);
+
+    overlay.appendChild(node);
+  });
+}
+
+// =========================
+// Lightbox
+// =========================
 function openDsLightbox(split, index) {
   currentSplit = split;
   currentIndex = index;
 
   const img = document.getElementById('dsLightboxImg');
+  const modal = document.getElementById('dsLightbox');
+
+  img.onload = async () => {
+    const name = datasetCache[split][index].name;
+    const labels = await fetchYoloLabels(split, name);
+    const iw = img.naturalWidth, ih = img.naturalHeight;
+    const boxesPx = (iw && ih) ? labels.map(l => yoloToXYWH(l, iw, ih)) : [];
+    const container = img.closest('.modal-inner');
+    const colors = classMeta.map(c=>c.color);
+    const names  = classMeta.map(c=>c.name);
+    drawOverlayBoxes(container, img, boxesPx, { labelNames:names, colorsByIndex:colors });
+  };
+
   img.src = datasetCache[split][index].url;
-  document.getElementById('dsLightbox').classList.add('show');
+  modal.classList.add('show');
 }
 
 function closeDsLightbox() {
@@ -17,25 +172,49 @@ function closeDsLightbox() {
   currentIndex = 0;
 }
 
+async function refreshLightboxOverlay(){
+  const modal = document.getElementById('dsLightbox');
+  if (!modal.classList.contains('show') || !currentSplit) return;
+  const img = document.getElementById('dsLightboxImg');
+  const container = img.closest('.modal-inner');
+  if (!img.naturalWidth) return;
+
+  const name = datasetCache[currentSplit][currentIndex].name;
+  const labels = await fetchYoloLabels(currentSplit, name);
+  const iw = img.naturalWidth, ih = img.naturalHeight;
+  const boxesPx = (iw && ih) ? labels.map(l => yoloToXYWH(l, iw, ih)) : [];
+  const colors = classMeta.map(c=>c.color);
+  const names  = classMeta.map(c=>c.name);
+  drawOverlayBoxes(container, img, boxesPx, { labelNames:names, colorsByIndex:colors });
+}
+
 function prevImage() {
   if (!currentSplit) return;
   currentIndex = (currentIndex - 1 + datasetCache[currentSplit].length) % datasetCache[currentSplit].length;
-  document.getElementById('dsLightboxImg').src = datasetCache[currentSplit][currentIndex].url;
+  const img = document.getElementById('dsLightboxImg');
+  img.onload = refreshLightboxOverlay;
+  img.src = datasetCache[currentSplit][currentIndex].url;
 }
 
 function nextImage() {
   if (!currentSplit) return;
   currentIndex = (currentIndex + 1) % datasetCache[currentSplit].length;
-  document.getElementById('dsLightboxImg').src = datasetCache[currentSplit][currentIndex].url;
+  const img = document.getElementById('dsLightboxImg');
+  img.onload = refreshLightboxOverlay;
+  img.src = datasetCache[currentSplit][currentIndex].url;
 }
 
 window.addEventListener('keydown', (ev) => {
   if (!currentSplit) return;
   if (ev.key === 'Escape') closeDsLightbox();
-  if (ev.key === 'ArrowLeft') prevImage();
+  if (ev.key === 'ArrowLeft')  prevImage();
   if (ev.key === 'ArrowRight') nextImage();
 });
+window.addEventListener('resize', refreshLightboxOverlay);
 
+// =========================
+// Dataset fetch + render
+// =========================
 async function fetchDataset() {
   const res = await fetch('/dataset/list');
   if (!res.ok) return;
@@ -50,7 +229,7 @@ async function fetchDataset() {
 }
 
 function renderSplit(split, payload) {
-  const grid = document.getElementById(`grid-${split}`);
+  const grid  = document.getElementById(`grid-${split}`);
   const count = document.getElementById(`count-${split}`);
   grid.innerHTML = '';
   count.textContent = `(${payload.count})`;
@@ -58,15 +237,39 @@ function renderSplit(split, payload) {
   (payload.items || []).forEach((it, idx) => {
     const card = document.createElement('div');
     card.className = 'thumb';
+    card.style.position = 'relative'; // NECESARIO para posicionar overlay
     card.innerHTML = `
       <img src="${it.url}" alt="${it.name}" loading="lazy">
       <div class="name" title="${it.name}">${it.name}</div>
     `;
     card.onclick = () => openDsLightbox(split, idx);
     grid.appendChild(card);
+
+    const img = card.querySelector('img');
+
+    const ensureOverlay = async () => {
+      if (!img.naturalWidth) return;
+      const labels = await fetchYoloLabels(split, it.name);
+      if (!labels.length) { 
+        const ov = card.querySelector('.bbox-layer'); 
+        if (ov) ov.innerHTML = ''; 
+        return; 
+      }
+      const iw = img.naturalWidth, ih = img.naturalHeight;
+      const boxesPx = labels.map(l => yoloToXYWH(l, iw, ih));
+      const colors = classMeta.map(c=>c.color);
+      const names  = classMeta.map(c=>c.name);
+      drawOverlayBoxes(card, img, boxesPx, { labelNames:names, colorsByIndex:colors });
+    };
+
+    if (img.complete && img.naturalWidth) ensureOverlay();
+    else img.addEventListener('load', ensureOverlay);
   });
 }
 
+// =========================
+// Abrir carpeta + uploads
+// =========================
 async function openAll(split) {
   try {
     const res = await fetch(`/dataset/open_folder/${split}`, { method: 'POST' });
@@ -81,19 +284,14 @@ async function openAll(split) {
   }
 }
 
-/* =========================
-   SUBIDA POR SPLIT
-   ========================= */
-
 // Dispara el input oculto del split
 function triggerUpload(split) {
   const input = document.getElementById(`upload-${split}`);
   if (!input) return;
-  input.value = ''; // reset para que pueda seleccionar lo mismo
+  input.value = '';
   input.click();
 }
 
-// Maneja el change de cada input oculto
 function attachUploadHandlers() {
   ['train', 'valid', 'test'].forEach(split => {
     const input = document.getElementById(`upload-${split}`);
@@ -106,37 +304,21 @@ function attachUploadHandlers() {
   });
 }
 
-// Sube los ficheros al endpoint del split
 async function doUpload(split, files) {
   const form = new FormData();
   files.forEach(file => form.append('files[]', file));
-
-  // deshabilitar botones mientras sube
   const panel = document.querySelector(`#grid-${split}`).closest('.panel');
   const btns = panel.querySelectorAll('.toolbar button');
   btns.forEach(b => b.disabled = true);
 
   try {
-    const res = await fetch(`/dataset/upload/${split}`, {
-      method: 'POST',
-      body: form
-    });
-
-    let payload = {};
-    try { payload = await res.json(); } catch (_) {}
-
+    const res = await fetch(`/dataset/upload/${split}`, { method:'POST', body: form });
+    let payload = {}; try{ payload = await res.json(); }catch{}
     if (!res.ok || payload.ok === false) {
       const msg = payload.error || res.statusText || 'Fallo subiendo archivos';
-      alert(`Error al subir a ${split}: ${msg}`);
-      return;
+      alert(`Error al subir a ${split}: ${msg}`); return;
     }
-
-    // Refresca conteo y grillas
-    await fetchDataset();
-
-    // Aviso corto
-    const added = payload.added ?? files.length;
-    console.log(`Subida a ${split} completada. Añadidos: ${added}`);
+    await fetchDataset(); // re-render y re-overlays
   } catch (e) {
     alert(`Error de red subiendo a ${split}: ${e}`);
   } finally {
@@ -144,8 +326,12 @@ async function doUpload(split, files) {
   }
 }
 
+// =========================
+// INIT
+// =========================
 document.getElementById('refreshBtn')?.addEventListener('click', fetchDataset);
-window.addEventListener('DOMContentLoaded', () => {
-  fetchDataset();
+window.addEventListener('DOMContentLoaded', async () => {
+  await loadClassesMetaOnce();
+  await fetchDataset();
   attachUploadHandlers();
 });

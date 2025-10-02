@@ -1,48 +1,32 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-  <meta charset="UTF-8" />
+  <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Datasets — ATL RDT</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
   <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.png') }}">
-  <style>
-    .page { min-height:100vh; display:flex; flex-direction:column; background:#0f0f12; color:#fff; }
-    .top { display:flex; align-items:center; gap:12px; padding:12px 16px; border-bottom:1px solid #2a2a35; background:#141419; }
-    .top .spacer{flex:1}
 
-    /* Cada panel ocupa su espacio y tiene scroll interno */
-    .wrap { padding:16px; display:grid; gap:16px; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); }
-    .panel {
-      background:#141419;
-      border:1px solid #2a2a35;
-      border-radius:12px;
-      padding:12px;
-      display:flex;
-      flex-direction:column;
-      max-height:75vh;           /* limite altura */
-    }
-    .panel h3 {
-      margin:0 0 8px 0;
-      font-size:16px;
-      display:flex;
-      align-items:center;
-      gap:8px;
-    }
-    .count { font-size:12px; opacity:.8; }
-    .thumbs {
+  <!-- CSS embebido -->
+  <style>
+    #dsLightbox { display: none; }
+    #dsLightbox.show { display: flex; }
+
+    /* Paneles */
+    .thumb-grid {
       display:grid;
       gap:10px;
       grid-template-columns:repeat(auto-fill,minmax(110px,1fr));
-      overflow-y:auto;            /* scroll interno */
+      overflow-y:auto;
       padding-right:4px;
     }
-    .thumbs::-webkit-scrollbar { width:8px; }
-    .thumbs::-webkit-scrollbar-thumb {
+    .thumb-grid::-webkit-scrollbar { width:8px; }
+    .thumb-grid::-webkit-scrollbar-thumb {
       background:#2a2a35;
       border-radius:4px;
     }
 
+    /* Miniatura */
     .thumb {
       border:1px solid #2a2a35;
       border-radius:8px;
@@ -50,13 +34,16 @@
       background:#0e0e12;
       cursor:pointer;
       transition:transform .2s;
+      position: relative;
     }
     .thumb:hover { transform:scale(1.02); }
+
     .thumb img {
       width:100%;
       height:90px;
-      object-fit:cover;
+      object-fit:contain;   /* clave para que no recorte */
       display:block;
+      background:#000;
     }
     .thumb .name {
       font-size:11px;
@@ -67,25 +54,48 @@
       opacity:.85;
     }
 
-    .toolbar { display:flex; gap:8px; margin-bottom:10px; }
+    /* Capa overlay */
+    .bbox-layer {
+      position:absolute;
+      left:0; top:0;
+      width:100%; height:100%;
+      pointer-events:none;
+      z-index:2;
+    }
+    .bbox {
+      position:absolute;
+      border:2px solid var(--accent);
+      border-radius:6px;
+      box-shadow:0 0 4px rgba(37,99,235,.35);
+    }
+    .bbox-label {
+      position:absolute;
+      top:-14px; left:0;
+      background:var(--accent);
+      color:#fff;
+      font-weight:700;
+      font-size:10px;
+      padding:2px 4px;
+      border-radius:4px;
+      white-space:nowrap;
+    }
 
     /* Lightbox */
     #dsLightbox {
       position:fixed;
       inset:0;
       background:rgba(0,0,0,.8);
-      display:none;
       align-items:center;
       justify-content:center;
       z-index:999;
     }
-    #dsLightbox.show { display:flex; }
     #dsLightbox img {
       max-width:90vw;
       max-height:90vh;
       object-fit:contain;
       border:2px solid #2a2a35;
       border-radius:8px;
+      display:block;
     }
     #dsLightbox .modal-close {
       position:absolute;
@@ -101,86 +111,65 @@
       height:40px;
       cursor:pointer;
     }
-
-    /* Flechas navegación */
-    .lb-arrow {
-      position:absolute;
-      top:50%;
-      transform:translateY(-50%);
-      background:rgba(0,0,0,.6);
-      color:#fff;
-      font-size:32px;
-      width:40px;
-      height:60px;
-      border:none;
-      cursor:pointer;
-      display:flex;
-      align-items:center;
-      justify-content:center;
-      z-index:1000;
-    }
-    .lb-arrow:hover { background:rgba(0,0,0,.8); }
-    .lb-prev { left:20px; }
-    .lb-next { right:20px; }
   </style>
 </head>
 <body>
-  <div class="page">
-    <div class="top">
-      <a class="btn-small" href="/">← Volver a principal</a>
-      <div style="font-weight:600;">Explorador de Datasets</div>
+  <div class="train-page">
+    <!-- Topbar -->
+    <div class="train-topbar">
+      <a class="btn-small btn-link" href="/">← Volver a principal</a>
+      <div style="font-weight:600;">Explorador de Dataset</div>
       <div class="spacer"></div>
       <button id="refreshBtn" class="btn-small">Actualizar</button>
     </div>
 
-    <div class="wrap">
-      <!-- TRAIN -->
-      <section class="panel">
-        <h3>Train <span id="count-train" class="count"></span></h3>
+    <!-- Contenido -->
+    <div class="train-body" style="gap:16px">
+      <!-- Panel TRAIN -->
+      <div class="panel" style="background:var(--panel); border:1px solid var(--border); border-radius:10px; padding:12px;">
         <div class="toolbar">
-          <button class="btn-small" onclick="openAll('train')">Abrir carpeta</button>
-          <button class="btn-small" onclick="triggerUpload('train')">Subir archivos</button>
-          <!-- input oculto para train -->
-          <input id="upload-train" type="file" multiple accept="image/*,.jpg,.jpeg,.png,.bmp,.tif,.tiff"
-                 style="display:none" />
+          <div style="font-weight:700;">Train <span id="count-train" style="opacity:.7">(0)</span></div>
+          <div class="spacer"></div>
+          <button class="btn-small" onclick="triggerUpload('train')">Subir imágenes</button>
+          <button class="btn-small btn-secondary" onclick="openAll('train')">Abrir carpeta</button>
+          <input id="upload-train" type="file" accept=".jpg,.jpeg,.png" multiple style="display:none"/>
         </div>
-        <div id="grid-train" class="thumbs"></div>
-      </section>
+        <div id="grid-train" class="thumb-grid"></div>
+      </div>
 
-      <!-- VALID -->
-      <section class="panel">
-        <h3>Valid <span id="count-valid" class="count"></span></h3>
+      <!-- Panel VALID -->
+      <div class="panel" style="background:var(--panel); border:1px solid var(--border); border-radius:10px; padding:12px;">
         <div class="toolbar">
-          <button class="btn-small" onclick="openAll('valid')">Abrir carpeta</button>
-          <button class="btn-small" onclick="triggerUpload('valid')">Subir archivos</button>
-          <!-- input oculto para valid -->
-          <input id="upload-valid" type="file" multiple accept="image/*,.jpg,.jpeg,.png,.bmp,.tif,.tiff"
-                 style="display:none" />
+          <div style="font-weight:700;">Valid <span id="count-valid" style="opacity:.7">(0)</span></div>
+          <div class="spacer"></div>
+          <button class="btn-small" onclick="triggerUpload('valid')">Subir imágenes</button>
+          <button class="btn-small btn-secondary" onclick="openAll('valid')">Abrir carpeta</button>
+          <input id="upload-valid" type="file" accept=".jpg,.jpeg,.png" multiple style="display:none"/>
         </div>
-        <div id="grid-valid" class="thumbs"></div>
-      </section>
+        <div id="grid-valid" class="thumb-grid"></div>
+      </div>
 
-      <!-- TEST -->
-      <section class="panel">
-        <h3>Test <span id="count-test" class="count"></span></h3>
+      <!-- Panel TEST -->
+      <div class="panel" style="background:var(--panel); border:1px solid var(--border); border-radius:10px; padding:12px;">
         <div class="toolbar">
-          <button class="btn-small" onclick="openAll('test')">Abrir carpeta</button>
-          <button class="btn-small" onclick="triggerUpload('test')">Subir archivos</button>
-          <!-- input oculto para test -->
-          <input id="upload-test" type="file" multiple accept="image/*,.jpg,.jpeg,.png,.bmp,.tif,.tiff"
-                 style="display:none" />
+          <div style="font-weight:700;">Test <span id="count-test" style="opacity:.7">(0)</span></div>
+          <div class="spacer"></div>
+          <button class="btn-small" onclick="triggerUpload('test')">Subir imágenes</button>
+          <button class="btn-small btn-secondary" onclick="openAll('test')">Abrir carpeta</button>
+          <input id="upload-test" type="file" accept=".jpg,.jpeg,.png" multiple style="display:none"/>
         </div>
-        <div id="grid-test" class="thumbs"></div>
-      </section>
+        <div id="grid-test" class="thumb-grid"></div>
+      </div>
     </div>
   </div>
 
-  <!-- Lightbox mejorado con flechas -->
-  <div id="dsLightbox">
-    <button class="lb-arrow lb-prev" onclick="prevImage()">❮</button>
-    <img id="dsLightboxImg" alt="Vista ampliada">
-    <button class="lb-arrow lb-next" onclick="nextImage()">❯</button>
-    <button class="modal-close" onclick="closeDsLightbox()">×</button>
+  <!-- Lightbox -->
+  <div id="dsLightbox" class="modal" onclick="closeDsLightbox()">
+    <div class="modal-inner" onclick="event.stopPropagation()">
+      <img id="dsLightboxImg" alt="Imagen dataset">
+      <!-- overlay de bboxes se inyecta dinámicamente -->
+      <button class="modal-close" onclick="closeDsLightbox()">×</button>
+    </div>
   </div>
 
   <script src="{{ url_for('static', filename='js/dataset.js') }}"></script>
