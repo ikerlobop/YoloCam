@@ -102,8 +102,10 @@
             </div>
           </div>
         </div>
+
         <!-- Lámina de capa (live + final) -->
-        <div class="grid-wrap" style="margin-top:18px;">
+        <!-- Nota: añadimos position:relative para el overlay -->
+        <div class="grid-wrap" style="margin-top:18px; position:relative;">
           <div class="gridTitle">Lámina de capa (en directo)</div>
         
           <!-- Canvas en vivo mientras se capturan slots -->
@@ -113,16 +115,21 @@
           <!-- Imagen final generada por el servidor (se muestra cuando exista) -->
           <img id="layerSheetFinal" class="hidden" alt="Lámina unificada de capa"
             style="width:100%;max-width:100%;border:1px solid var(--border);border-radius:12px;display:block;margin-top:8px;" />
+          
+          <!-- Canvas overlay permanente para bounding boxes sobre la imagen final -->
+          <canvas id="layerSheetOverlay"
+            style="position:absolute; left:0; top:0; width:100%; height:auto; pointer-events:none; border-radius:12px;"></canvas>
         
           <div id="layerSheetStatus" style="font-size:12px;opacity:.7;margin-top:6px;"></div>
         </div>
-          <div style="margin-top:10px;display:flex;gap:12px;align-items:center;">
-            <button id="deleteSheetBtn" class="btn-small warn">Borrar lámina capa</button>
-          </div>
+
+        <div style="margin-top:10px;display:flex;gap:12px;align-items:center;">
+          <button id="deleteSheetBtn" class="btn-small warn">Borrar lámina capa</button>
         </div>
+      </div>
     </div>
 
-        <!-- ===== PANE ENTRENAMIENTO (oculto por defecto) ===== -->
+    <!-- ===== PANE ENTRENAMIENTO (oculto por defecto) ===== -->
     <div id="trainingPane" class="training-pane hidden">
       <div class="train-toolbar">
         <div class="row">
@@ -156,6 +163,7 @@
         <canvas id="trainCanvas" width="960" height="640"></canvas>
       </div>
     </div>
+
     <!-- ===== PANE BIBLIOTECA DE CAPTURAS ===== -->
     <div class="photo-library">
       <div class="library-header">BIBLIOTECA DE CAPTURAS</div>
@@ -177,8 +185,8 @@
           </div>
         </div>
         <div id="thumbs" class="thumb-grid" style="display:grid;gap:60px;grid-template-columns:repeat(auto-fill, minmax(120px, 1fr));">
-
           <!-- Thumbnails cargados dinámicamente aquí -->
+        </div>
       </div>
     </div>
 
@@ -188,15 +196,15 @@
     </div>
   </div>
 
- <!-- Lightbox -->
-<div id="lightbox" class="modal hidden" onclick="closeLightbox(event)">
-  <div class="modal-inner" id="lightboxInner">
-    <img id="lightboxImg" alt="Vista ampliada">
-    <!-- Overlay de cajas para la imagen ampliada -->
-    <div id="lightboxOverlay" class="bbox-layer"></div>
-    <button class="modal-close" onclick="closeLightbox(event)">×</button>
+  <!-- Lightbox -->
+  <div id="lightbox" class="modal hidden" onclick="closeLightbox(event)">
+    <div class="modal-inner" id="lightboxInner">
+      <img id="lightboxImg" alt="Vista ampliada">
+      <!-- Overlay de cajas para la imagen ampliada -->
+      <div id="lightboxOverlay" class="bbox-layer"></div>
+      <button class="modal-close" onclick="closeLightbox(event)">×</button>
+    </div>
   </div>
-</div>
 
   <script src="{{ url_for('static', filename='js/app.js') }}"></script>
 </body>

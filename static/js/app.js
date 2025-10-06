@@ -1,3 +1,7 @@
+// Modo lámina final ya dibujada en canvas (no sobrescribir con /state)
+let FINAL_MODE = false;
+
+
 // ======= Reloj =======
 function updateTime() {
   const now = new Date();
@@ -988,23 +992,70 @@ async function tickLayerSheet() {
     const finalUrl = await checkFinalSheet(sheetLayerId);
 
     if (finalUrl) {
-    // Mostrar imagen final y ocultar canvas live
-    if (sheetFinal) {
-      // Evita volver a recargar la misma imagen si ya la estamos mostrando
-      const cleanSrc = sheetFinal.src.split('?')[0];
-      if (!cleanSrc.endsWith(`/layer_${sheetLayerId}.jpg`)) {
-        sheetFinal.src = finalUrl;
-      }
-      sheetFinal.classList.remove('hidden');
-    }
-    if (sheetCanvas) sheetCanvas.classList.add('hidden');
-    if (sheetStatus) sheetStatus.textContent = `Lámina final generada — capa ${sheetLayerId}`;
+  // ==== Nueva versión: renderizar imagen final directamente en el canvas ====
+  if (sheetCtx && sheetCanvas) {
+    // cargar imagen final y dibujarla en canvas
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = async () => {
+      sheetCtx.clearRect(0, 0, sheetCanvas.width, sheetCanvas.height);
+      // Dibuja imagen final completa (contain)
+      const iw = img.naturalWidth, ih = img.naturalHeight;
+      const scale = Math.min(sheetCanvas.width / iw, sheetCanvas.height / ih);
+      const dw = iw * scale, dh = ih * scale;
+      const dx = (sheetCanvas.width - dw) / 2;
+      const dy = (sheetCanvas.height - dh) / 2;
+      sheetCtx.drawImage(img, dx, dy, dw, dh);
 
-    // ⚠️ Paramos watcher: ya no tiene sentido seguir pidiendo /layers + HEAD/GET
-    stopSheetWatcher();
-    lastWatchedLayer = sheetLayerId;
-    return;
+      // Ahora pedimos boxes por capa al backend
+      try {
+        const r = await fetch(`/library?layer=${sheetLayerId}`);
+        const data = await r.json();
+        const items = data.items || [];
+        const palette = classPalette || {};
+        const names = classNames || {};
+
+        // Dibujar todos los boxes de esa capa (fusionados)
+        items.forEach(it => {
+          (it.boxes || []).forEach(b => {
+            const color = palette[b.cls] || '#00ff00';
+            const name = names[b.cls] || `C${b.cls}`;
+            const bx = (b.xc - b.w / 2) * dw + dx;
+            const by = (b.yc - b.h / 2) * dh + dy;
+            const bw = b.w * dw;
+            const bh = b.h * dh;
+            sheetCtx.strokeStyle = color;
+            sheetCtx.lineWidth = 2;
+            sheetCtx.strokeRect(bx, by, bw, bh);
+            sheetCtx.fillStyle = color;
+            sheetCtx.font = '12px Segoe UI';
+            sheetCtx.fillText(name, bx + 4, by + 14);
+          });
+        });
+
+        if (sheetStatus)
+          sheetStatus.textContent = `Lámina final — capa ${sheetLayerId} con ${items.length} capturas`;
+      } catch (e) {
+        console.warn('no boxes para lámina', e);
+      }
+    };
+    img.src = `${finalUrl}?cb=${Date.now()}`;
+  }
+
+  // NO ocultamos canvas, lo dejamos activo
+  if (sheetFinal) sheetFinal.classList.add('hidden');
+  sheetCanvas.classList.remove('hidden');
+
+  if (sheetStatus) sheetStatus.textContent = `Lámina final generada — capa ${sheetLayerId}`;
+
+  await drawFinalBoxes(sheetLayerId);
+
+  // mantenemos watcher activo (no se detiene)
+  lastWatchedLayer = sheetLayerId;
+  return;
 }
+
+
 
 
     // 3) No existe final: pintar live desde el grid actual (/state.images)
@@ -1228,3 +1279,48 @@ renderLibrary = function(dataOrUrls) {
   }
 };
 
+// ====== DIBUJAR BOUNDING BOXES SOBRE IMAGEN FINAL DE LÁMINA ======
+const overlayCanvas = document.getElementById('layerSheetOverlay');
+const overlayCtx = overlayCanvas.getContext('2d');
+
+async function drawFinalBoxes(layerId) {
+  try {
+    // 1. Esperar a que la imagen final esté visible
+    const sheetFinal = document.getElementById('layerSheetFinal');
+    if (!sheetFinal || sheetFinal.classList.contains('hidden')) return;
+
+    // 2. Ajustar overlay al tamaño mostrado
+    const rect = sheetFinal.getBoundingClientRect();
+    overlayCanvas.width = rect.width;
+    overlayCanvas.height = rect.height;
+
+    overlayCtx.clearRect(0, 0, rect.width, rect.height);
+
+    // 3. Pedir cajas al backend
+    const res = await fetch(`/library?layer=${layerId}`);
+    const data = await res.json();
+    const items = data.items || [];
+
+    // 4. Dibujar cajas
+    items.forEach(it => {
+      (it.boxes || []).forEach(b => {
+        const color = classPalette[b.cls] || '#00ff00';
+        const name = classNames[b.cls] || `C${b.cls}`;
+
+        const bx = (b.xc - b.w / 2) * rect.width;
+        const by = (b.yc - b.h / 2) * rect.height;
+        const bw = b.w * rect.width;
+        const bh = b.h * rect.height;
+
+        overlayCtx.strokeStyle = color;
+        overlayCtx.lineWidth = 2;
+        overlayCtx.strokeRect(bx, by, bw, bh);
+        overlayCtx.fillStyle = color;
+        overlayCtx.font = '12px Segoe UI';
+        overlayCtx.fillText(name, bx + 4, by + 14);
+      });
+    });
+  } catch (e) {
+    console.warn('No se pudieron dibujar los bounding boxes de lámina', e);
+  }
+}

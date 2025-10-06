@@ -436,6 +436,44 @@ def bundle_layer_assets(layer: int, grid_cols: int = 5, grid_rows: int = 2, gutt
         x = c * (tile_w + gutter)
         y = r * (tile_h + gutter)
         sheet.paste(th, (x, y))
+
+        # ======= NUEVO: dibujar bounding boxes sobre el tile =======
+        try:
+            from PIL import ImageDraw, ImageFont
+            conn = get_db()
+            cur = conn.execute(
+                "SELECT labels_json FROM captures WHERE path=?",
+                ((path.replace(app.static_folder + os.sep, '').replace('\\', '/')),)
+            )
+            row = cur.fetchone()
+            conn.close()
+
+            if row and row["labels_json"]:
+                boxes = json.loads(row["labels_json"])
+                draw = ImageDraw.Draw(sheet)
+                for b in boxes:
+                    cls = b.get("cls", 0)
+                    xc, yc, w, h = b.get("xc"), b.get("yc"), b.get("w"), b.get("h")
+                    if None in (xc, yc, w, h): 
+                        continue
+                    # Convertir coords normalizadas a píxeles en el tile
+                    x0 = x + (xc - w/2) * tile_w
+                    y0 = y + (yc - h/2) * tile_h
+                    x1 = x + (xc + w/2) * tile_w
+                    y1 = y + (yc + h/2) * tile_h
+                    color = (255, 0, 0)
+                    try:
+                        with open(_classes_json_path(), "r", encoding="utf-8") as cf:
+                            j = json.load(cf)
+                            palette = [tuple(int(jc[i:i+2], 16) for i in (1,3,5)) for jc in [c["color"] for c in j["classes"]]]
+                            color = palette[cls % len(palette)]
+                    except Exception:
+                        pass
+                    draw.rectangle([x0, y0, x1, y1], outline=color, width=2)
+        except Exception as e:
+            print(f"[WARN] No se pudieron dibujar cajas sobre {path}: {e}")
+        # ======= FIN NUEVO =======
+
         idx += 1
 
     # 7) Guardar lámina
