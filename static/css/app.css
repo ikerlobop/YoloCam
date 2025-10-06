@@ -401,3 +401,23 @@ body{
 .class-row .del{min-width:34px; height:34px; border-radius:8px; cursor:pointer;
   border:1px solid var(--border); background:#2a2f3a; color:#fff; font-weight:800;}
 .class-row .del:hover{background:#333b49}
+
+/* ====== PAN MODE ====== */
+
+/* Atenuado de las coordenadas durante pan */
+.coords-hud.dim {
+  opacity: .35;
+  filter: saturate(0.7);
+  transition: opacity .15s ease, filter .15s ease;
+}
+
+/* HUD en modo pan (texto en ámbar y parpadeo) */
+#hud.pan-mode {
+  color: var(--warn, #f59e0b);
+  animation: panBlink 1s infinite alternate;
+}
+
+@keyframes panBlink {
+  from { opacity: 1; }
+  to   { opacity: 0.6; }
+}

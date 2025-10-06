@@ -2,3 +2,4 @@ grieta
 hendidura
 rotura
 rozadura
+gap

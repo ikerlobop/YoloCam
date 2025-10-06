@@ -180,6 +180,7 @@ fetch('/annotate/classes_meta').then(r=>r.json()).then(j=>{
 });
 
 // ======= Helpers de overlay para Lightbox =======
+// ======= Helpers de overlay para Lightbox (actualizado con escala real) =======
 function _computeContainRect(containerEl, imgEl) {
   const cw = containerEl.clientWidth;
   const ch = containerEl.clientHeight;
@@ -190,7 +191,7 @@ function _computeContainRect(containerEl, imgEl) {
   const dispH = ih * scale;
   const offsetX = (cw - dispW) / 2;
   const offsetY = (ch - dispH) / 2;
-  return { left: offsetX, top: offsetY, width: dispW, height: dispH };
+  return { left: offsetX, top: offsetY, width: dispW, height: dispH, scale };
 }
 
 function layoutLightboxOverlayAndDraw() {
@@ -205,17 +206,38 @@ function layoutLightboxOverlayAndDraw() {
   overlay.style.top = rect.top + 'px';
   overlay.style.width = rect.width + 'px';
   overlay.style.height = rect.height + 'px';
-
   overlay.innerHTML = '';
-  drawBoxesOnLayer(overlay, _lbBoxes);
+
+  const boxes = _lbBoxes || [];
+  if (!boxes.length) return;
+
+  boxes.forEach(b => {
+    const color = classPalette[b.cls] || '#00ff00';
+    const name = classNames[b.cls] || `C${b.cls}`;
+
+    const bx = (b.xc - b.w / 2) * rect.width;
+    const by = (b.yc - b.h / 2) * rect.height;
+    const bw = b.w * rect.width;
+    const bh = b.h * rect.height;
+
+    const box = document.createElement('div');
+    box.className = 'bbox';
+    box.style.borderColor = color;
+    box.style.left = bx + 'px';
+    box.style.top = by + 'px';
+    box.style.width = bw + 'px';
+    box.style.height = bh + 'px';
+
+    const label = document.createElement('div');
+    label.className = 'bbox-label';
+    label.style.background = color;
+    label.textContent = name;
+    box.appendChild(label);
+
+    overlay.appendChild(box);
+  });
 }
 
-window.addEventListener('resize', () => {
-  const lb = document.getElementById('lightbox');
-  if (lb && !lb.classList.contains('hidden')) {
-    layoutLightboxOverlayAndDraw();
-  }
-});
 
 // ======= Biblioteca (thumbnails) =======
 function renderLibrary(dataOrUrls) {
@@ -1039,3 +1061,170 @@ deleteSheetBtn?.addEventListener('click', async () => {
     alert("Error de red al borrar lámina.");
   }
 });
+
+// ==============================
+// VISUALIZACIÓN DE BOUNDING BOXES
+// ==============================
+
+// Paleta global desde /annotate/classes_meta
+let classPalette = {};
+let classNames = {};
+
+fetch('/annotate/classes_meta')
+  .then(r => r.json())
+  .then(j => {
+    (j.classes || []).forEach((c, i) => {
+      classPalette[i] = c.color || '#00ff00';
+      classNames[i] = c.name || `C${i}`;
+    });
+  });
+
+// ---------- LÁMINA EN DIRECTO ----------
+async function drawLiveSheetWithBoxes(items) {
+  if (!sheetCtx || !sheetCanvas) return;
+  sheetCtx.clearRect(0, 0, sheetCanvas.width, sheetCanvas.height);
+  const list = (items || []).slice(0, SHEET_COLS * SHEET_ROWS);
+  const imgs = await Promise.all(
+    list.map(it => new Promise(res => {
+      const im = new Image();
+      im.onload = () => res({ im, boxes: it.boxes || [] });
+      im.onerror = () => res(null);
+      im.src = it.url + '?t=' + Date.now();
+    }))
+  );
+
+  let idx = 0;
+  for (const it of imgs) {
+    const r = Math.floor(idx / SHEET_COLS);
+    const c = idx % SHEET_COLS;
+    const dx = c * TILE_W;
+    const dy = r * TILE_H;
+
+    if (it && it.im) {
+      drawCover(sheetCtx, it.im, dx, dy, TILE_W, TILE_H);
+      drawBoxesOnSheet(sheetCtx, it.boxes || [], dx, dy, TILE_W, TILE_H, it.im.naturalWidth, it.im.naturalHeight);
+    } else {
+      sheetCtx.fillStyle = '#111';
+      sheetCtx.fillRect(dx, dy, TILE_W, TILE_H);
+    }
+    idx++;
+  }
+
+  if (sheetStatus) sheetStatus.textContent = `Lámina en directo — capa ${sheetLayerId}`;
+}
+
+function drawBoxesOnSheet(ctx, boxes, dx, dy, tw, th, iw, ih) {
+  if (!boxes || !boxes.length) return;
+  ctx.save();
+  ctx.lineWidth = 2;
+  boxes.forEach(b => {
+    const color = classPalette[b.cls] || '#00ff00';
+    const x = (b.xc - b.w/2) * tw;
+    const y = (b.yc - b.h/2) * th;
+    const w = b.w * tw;
+    const h = b.h * th;
+    ctx.strokeStyle = color;
+    ctx.strokeRect(dx + x, dy + y, w, h);
+    ctx.fillStyle = color;
+    ctx.font = '12px Segoe UI';
+    ctx.fillText(`C${b.cls}`, dx + x + 2, dy + y + 12);
+  });
+  ctx.restore();
+}
+
+// Sobrescribimos tickLayerSheet para usar las cajas si existen
+const _tickLayerSheetOrig = tickLayerSheet;
+tickLayerSheet = async function() {
+  if (!sheetWatching) return;
+  try {
+    const lr = await fetch('/layers', { cache: 'no-store' });
+    const ldata = await lr.json();
+    sheetLayerId = ldata.current || 0;
+
+    const finalUrl = await checkFinalSheet(sheetLayerId);
+    if (finalUrl) {
+      if (sheetFinal) {
+        const cleanSrc = sheetFinal.src.split('?')[0];
+        if (!cleanSrc.endsWith(`/layer_${sheetLayerId}.jpg`)) sheetFinal.src = finalUrl;
+        sheetFinal.classList.remove('hidden');
+      }
+      if (sheetCanvas) sheetCanvas.classList.add('hidden');
+      if (sheetStatus) sheetStatus.textContent = `Lámina final generada — capa ${sheetLayerId}`;
+      stopSheetWatcher();
+      return;
+    }
+
+    // Live desde /state, con boxes
+    const sr = await fetch('/state', { cache: 'no-store' });
+    const sdata = await sr.json();
+    const items = sdata.items || [];
+    if (sheetFinal) sheetFinal.classList.add('hidden');
+    if (sheetCanvas) sheetCanvas.classList.remove('hidden');
+    await drawLiveSheetWithBoxes(items);
+
+  } catch (e) {
+    console.warn('tickLayerSheet (bbox) error:', e);
+    if (sheetStatus) sheetStatus.textContent = 'Lámina: error al actualizar';
+  }
+};
+
+// ---------- BIBLIOTECA DE CAPTURAS ----------
+const _renderLibraryOrig = renderLibrary;
+// ---------- BIBLIOTECA DE CAPTURAS (solo canvas con boxes) ----------
+renderLibrary = function(dataOrUrls) {
+  const thumbs = document.getElementById('thumbs');
+  thumbs.innerHTML = '';
+
+  // Normalizamos items: [{url, boxes}] o [url]
+  const items = (dataOrUrls && dataOrUrls.length && typeof dataOrUrls[0] === 'object')
+    ? dataOrUrls
+    : (dataOrUrls || []).map(u => ({ url: u, boxes: [] }));
+
+  for (const it of items) {
+    const wrap = document.createElement('div');
+    wrap.className = 'thumb-wrap';
+
+    // Canvas único (sin imagen duplicada)
+    const canvas = document.createElement('canvas');
+    canvas.width = 160;  // tamaño thumbnail
+    canvas.height = 120;
+    canvas.className = 'thumb-canvas';
+    wrap.appendChild(canvas);
+    thumbs.appendChild(wrap);
+
+    const ctx = canvas.getContext('2d');
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      // centrado tipo "contain"
+      const scale = Math.min(canvas.width / img.naturalWidth, canvas.height / img.naturalHeight);
+      const w = img.naturalWidth * scale;
+      const h = img.naturalHeight * scale;
+      const x = (canvas.width - w) / 2;
+      const y = (canvas.height - h) / 2;
+
+      // dibujar imagen base
+      ctx.drawImage(img, x, y, w, h);
+
+      // dibujar cajas
+      (it.boxes || []).forEach(b => {
+        const color = classPalette[b.cls] || '#00ff00';
+        const bx = x + (b.xc - b.w/2) * w;
+        const by = y + (b.yc - b.h/2) * h;
+        const bw = b.w * w;
+        const bh = b.h * h;
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1.5;
+        ctx.strokeRect(bx, by, bw, bh);
+        ctx.fillStyle = color;
+        ctx.font = '10px Segoe UI';
+        ctx.fillText(`C${b.cls}`, bx + 2, by + 10);
+      });
+    };
+    img.src = it.url + '?t=' + Date.now();
+
+    // Click = abrir en lightbox con sus boxes
+    canvas.addEventListener('click', () => openLightbox(it));
+  }
+};
+

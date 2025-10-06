@@ -15,6 +15,10 @@
     {
       "name": "rozadura",
       "color": "#2eff7e"
+    },
+    {
+      "name": "gap",
+      "color": "#aa807d"
     }
   ]
 }
