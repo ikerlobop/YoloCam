@@ -5,196 +5,215 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>ATL RDT Control System</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+  <!-- <link rel="stylesheet" href="app.css"> -->
   <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.png') }}">
 </head>
 <body>
-  <!-- Sidebar -->
-  <div class="sidebar">
-    <div class="sidebar-header">
-      <div class="system-title">ATL RDT SYSTEM</div>
-      <div class="system-subtitle">Quality Control Interface</div>
-    </div>
-
-    <div class="project-section">
-      <div class="section-label">Proyecto Activo</div>
-      <div class="project-name">WING_A320_COMPOSITE_v3.2</div>
-      <div class="info-grid">
-        <div class="info-item"><div class="info-label">Máquina</div><div class="info-value">ATL-05</div></div>
-        <div class="info-item"><div class="info-label">Bobina</div><div class="info-value">CF-945</div></div>
-        <div class="info-item"><div class="info-label">Material</div><div class="info-value">T800-CF</div></div>
-        <div class="info-item"><div class="info-label">Lote</div><div class="info-value">L-240919</div></div>
+  <!-- Header -->
+  <header>
+    <nav class="navbar-model-3">
+      <div class="logo">
+        <span>RDT</span>
       </div>
-    </div>
-
-    <div class="layer-section">
-      <div class="section-label">Control de Capas</div>
-      <div class="current-layer-display">
-        <div class="layer-number" id="layerCurrent">0</div>
-        <div class="layer-total">de <span id="layerTotal">32</span> capas</div>
+      
+      <div class="nav-links">
+        <a href="#entrenamiento">Entrenamiento</a>
+        <span class="separator">|</span>
+        <a href="#dataset" class="current-page">Dataset</a>
       </div>
-    </div>
 
-    <div class="position-section">
-      <div class="section-label">Posición ATL en Tiempo Real</div>
-      <div class="position-display">
-        <div class="position-title">Coordenadas Máquina</div>
-        <div class="position-grid">
-          <div class="position-item"><div class="position-axis">X</div><div class="position-value" id="posX"></div><div class="position-unit">mm</div></div>
-          <div class="position-item"><div class="position-axis">Y</div><div class="position-value" id="posY">180</div><div class="position-unit">mm</div></div>
-          <div class="position-item"><div class="position-axis">Z</div><div class="position-value" id="posZ"></div><div class="position-unit">mm</div></div>
-          <div class="position-item"><div class="position-axis">U</div><div class="position-value" id="posU">0°</div><div class="position-unit">°</div></div>
+      <div class="user-info">
+            <span class="operator-name">Miguel Rodríguez</span>
+            <span class="separator">|</span>
+            <span class="operator-role">Operario Senior</span>
+         
+       
+        <span class="separator">|</span>
+        <button class="logout-btn" onclick="window.location.href='/logout'">Cerrar Sesión</button>
+        <div class="time-display" id="currentTime">09:17:29</div>
+      </div>
+    </nav>
+  </header>
+  
+  <!-- Info Bar -->
+    <div class="info-bar-1">
+        <div class="button-row">
+            <button class="btn btn-sm btn-green" id="startBtn">▶️ Iniciar Captura</button>
+            <button class="btn btn-sm btn-yellow" id="resetBtn">🔄 Reiniciar</button>
+            <button class="btn btn-sm primary-btn" id="resetLayersBtn">🔄 Reset Capas</button>
+            <button class="btn btn-sm btn-red-bg" id="deleteSheetBtn">❌ Borrar Lámina</button>
+            </div><div class="info-item-1">
+        <span class="label">MÁQUINA</span>
+        <span class="value">ATL-05</span>
         </div>
-        <div class="position-status"><div class="status-dot-position"></div>Sistema de posicionamiento ATL activo</div>
-      </div>
-    </div>
-  </div>
-
-  <!-- Área principal -->
-  <div class="main-area">
-    <div class="top-bar">
-      <div class="operator-info">
-        <div class="operator-selector">
-          <div class="operator-avatar">OP</div>
-          <div>
-            <div class="operator-name">Operario</div>
-            <div class="operator-role">—</div>
-          </div>
+        <div class="separator-v"></div>
+        <div class="info-item-1">
+        <span class="label">BOBINA</span>
+        <span class="value">CF-945</span>
         </div>
-        <div class="action-buttons">
-          <button id="startBtn" class="btn-small btn-success">Arrancar Captura</button>
-          <button id="resetBtn" class="btn-small btn-warn">Reset</button>
-          <button id="resetLayersBtn" class="btn-small btn-warn">Reset Capas</button>
+        <div class="separator-v"></div>
+        <div class="info-item-1">
+        <span class="label">MATERIAL</span>
+        <span class="value">T800-CF</span>
+        </div>
+        <div class="separator-v"></div>
+        <div class="info-item-1">
+        <span class="label">LOTE</span>
+        <span class="value highlight-orange">L-240919</span>
+        </div>
+    </div><!-- Main Content -->
+  
+  <!-- Main Content -->
+  <main class="console-layout">
+    
+    <div class="ia-panel-container-obs">
+      
+      <!-- Capturas Preview -->
+      <section class="obs-panel obs-preview">
+        <div class="panel-badge edit-badge">EDICIÓN</div>
+        <h2 class="obs-title">Capturas (Preview)</h2>
         
-          <a class="btn-small" href="/training">Entrenamiento</a>
-          <a class="btn-small" href="/dataset_browser">Datasets</a>
-        
-        
-        </div>
-        </div>
-
-      <div class="controls-section"></div>
-
-      <div class="time-and-logout">
-        <button class="logout-btn" onclick="window.location.href='/logout'">Cerrar sesión</button>
-        <div class="time-display" id="currentTime">--:--:--</div>
-      </div>
-    </div>
-
-    <div class="main-content">
-      <div class="main-display">
-        <div class="video-header">
-          <div class="video-title">FEED EN VIVO - CÁMARA PRINCIPAL</div>
-          <div class="video-stats">640×480 | 30 FPS | Flask Grid</div>
-        </div>
-
-        <!-- GRID 2×5 -->
-        <div class="grid-wrap">
-          <div class="gridTitle">Capturas (2×5)</div>
-
-          <div class="grid" id="grid">
-            <!-- Overlay móvil que salta de slot a slot (dentro del grid) -->
-            <div id="scanOverlay" class="scan-overlay hidden" aria-hidden="true">
-              <div class="scan-border"></div>
-              <div class="scan-center-h"></div>
-              <div class="scan-center-v"></div>
-              <div class="scan-sweep-h"></div>
-              <div class="scan-sweep-v"></div>
+        <div class="obs-viewport-wrapper">
+          <!-- GRID 2×5 -->
+          <div class="grid-wrap">
+            <div class="grid" id="grid">
+              <!-- Overlay móvil que salta de slot a slot (dentro del grid) -->
+              <div id="scanOverlay" class="scan-overlay hidden" aria-hidden="true">
+                <div class="scan-border"></div>
+                <div class="scan-center-h"></div>
+                <div class="scan-center-v"></div>
+                <div class="scan-sweep-h"></div>
+                <div class="scan-sweep-v"></div>
+              </div>
             </div>
           </div>
-        </div>
-
-        <!-- Lámina de capa (live + final) -->
-        <!-- Nota: añadimos position:relative para el overlay -->
-        <div class="grid-wrap" style="margin-top:18px; position:relative;">
-          <div class="gridTitle">Lámina de capa (en directo)</div>
-        
-          <!-- Canvas en vivo mientras se capturan slots -->
-          <canvas id="layerSheetCanvas" width="1600" height="480"
-            style="width:100%;max-width:100%;height:auto;border:1px solid var(--border);border-radius:12px;"></canvas>
-        
-          <!-- Imagen final generada por el servidor (se muestra cuando exista) -->
-          <img id="layerSheetFinal" class="hidden" alt="Lámina unificada de capa"
-            style="width:100%;max-width:100%;border:1px solid var(--border);border-radius:12px;display:block;margin-top:8px;" />
           
-          <!-- Canvas overlay permanente para bounding boxes sobre la imagen final -->
-          <canvas id="layerSheetOverlay"
-            style="position:absolute; left:0; top:0; width:100%; height:auto; pointer-events:none; border-radius:12px;"></canvas>
+          <div class="viewport-info">Capa Activa: T800-CF | 4/10</div>
+        </div>
+        <div class="bottom-status flex justify-between items-center text-xs pt-1 border-t mt-1 border-gray-100">
+          <div style="font-size:12px;opacity:.8; color: var(--text-secondary);">Estado: Proceso de escaneo activo...</div>
+        <div class="layer-counter-box mt-auto" style="">
+          
+          <div class="layer-counter-values">
+            <div class="layer-current-val" id="layerCurrent">3</div>
+            <div class="layer-total-val">de <span id="layerTotal">32</span> capas</div>
+          </div>
+        </div></div>
+      </section>
+      
+      <!-- Lámina de Capa -->
+      <section class="obs-panel obs-program">
+        <div class="panel-badge live-badge">LIVE</div>
+        <h2 class="obs-title">Lámina de Capa (Programa)</h2>
+
+        <div class="obs-viewport-wrapper program-view">
+          <!-- Lámina de capa (live + final) -->
+          <div class="grid-wrap" style="position:relative;">
+            <!-- Canvas en vivo mientras se capturan slots -->
+            <canvas id="layerSheetCanvas" width="1600" height="480"
+              style="width:100%;max-width:100%;height:auto;border:1px solid var(--border);border-radius:12px;"></canvas>
+          
+            <!-- Imagen final generada por el servidor (se muestra cuando exista) -->
+            <img id="layerSheetFinal" class="hidden" alt="Lámina unificada de capa"
+              style="width:100%;max-width:100%;border:1px solid var(--border);border-radius:12px;display:block;margin-top:8px;" />
+            
+            <!-- Canvas overlay permanente para bounding boxes sobre la imagen final -->
+            <canvas id="layerSheetOverlay"
+              style="position:absolute; left:0; top:0; width:100%; height:auto; pointer-events:none; border-radius:12px;"></canvas>
+            
+            <div id="layerSheetStatus" style="font-size:12px;opacity:.7;margin-top:6px;"></div>
+          </div>
+        </div>
         
-          <div id="layerSheetStatus" style="font-size:12px;opacity:.7;margin-top:6px;"></div>
+        <div class="bottom-status flex justify-between items-center text-xs pt-1 border-t mt-1 border-gray-100">
+          <div style="font-size:12px;opacity:.8; color: var(--text-secondary);">Estado UI: solo-grid</div>
+          <div class="system-performance text-xs text-gray-400">GPU: 45% | CPU: 12% | RAM: 8.2GB </div>
         </div>
-
-        <div style="margin-top:10px;display:flex;gap:12px;align-items:center;">
-          <button id="deleteSheetBtn" class="btn-small warn">Borrar lámina capa</button>
-        </div>
-      </div>
+      </section>
+      
     </div>
-
-    <!-- ===== PANE ENTRENAMIENTO (oculto por defecto) ===== -->
-    <div id="trainingPane" class="training-pane hidden">
-      <div class="train-toolbar">
-        <div class="row">
-          <label>Split:</label>
-          <select id="splitSelect">
-            <option value="train">train</option>
-            <option value="valid">valid</option>
-            <option value="test">test</option>
-          </select>
-
-          <label>Imagen:</label>
-          <select id="imageSelect" style="min-width:240px;"></select>
-          <button id="loadImageBtn" class="btn-small">Cargar</button>
-          <div class="spacer"></div>
-          <label>Clase (texto de classes.txt):</label>
-          <input id="classInput" placeholder="grieta / porosidad / ..." />
+    
+    <!-- Control Panels Bottom -->
+    <div class="control-grid-bottom">
+      <!-- Estado de Máquina -->
+      <section class="bottom-panel">
+        <div class="panel-header">
+          <h3 class="panel-subtitle">Estado de Máquina (ATL)</h3>
+        </div>
+        
+        <div class="machine-data-box">
+          <h4 class="data-title-indigo">Posición ATL en Tiempo Real</h4>
+          
+          <div class="position-grid">
+            <div class="position-item">
+              <div class="pos-label">X</div>
+              <div class="pos-value" id="posX"></div>
+              <div class="pos-unit">mm</div>
+            </div>
+            <div class="position-item">
+              <div class="pos-label">Y</div>
+              <div class="pos-value" id="posY">180</div>
+              <div class="pos-unit">mm</div>
+            </div>
+            <div class="position-item">
+              <div class="pos-label">Z</div>
+              <div class="pos-value" id="posZ"></div>
+              <div class="pos-unit">mm</div>
+            </div>
+            <div class="position-item">
+              <div class="pos-label">U</div>
+              <div class="pos-value" id="posU">0°</div>
+              <div class="pos-unit">°</div>
+            </div>
+          </div>
+          
+          <div class="status-indicator">
+            <div class="status-dot status-dot-pulse"></div> 
+            Sistema de posicionamiento ATL activo
+          </div>
         </div>
 
-        <div class="row">
-          <button id="zoomInBtn" class="btn-small">+</button>
-          <button id="zoomOutBtn" class="btn-small">-</button>
-          <button id="resetViewBtn" class="btn-small">Reset vista</button>
-          <button id="undoBoxBtn" class="btn-small">Deshacer</button>
-          <button id="clearBoxesBtn" class="btn-small warn">Reset cajas</button>
-          <button id="saveAnnBtn" class="btn-small success">Guardar anotación</button>
-          <div id="hud" class="hud"></div>
+      </section>
+
+      <!-- Biblioteca de Capturas -->
+      <section class="bottom-panel overflow-hidden">
+        <div class="panel-header">
+          <h3 class="panel-subtitle">Biblioteca de Capturas</h3>
         </div>
-      </div>
-
-      <div class="train-canvas-wrap">
-        <canvas id="trainCanvas" width="960" height="640"></canvas>
-      </div>
-    </div>
-
-    <!-- ===== PANE BIBLIOTECA DE CAPTURAS ===== -->
-    <div class="photo-library">
-      <div class="library-header">BIBLIOTECA DE CAPTURAS</div>
-      <div class="photos-container">
-        <div class="library-controls" style="display:flex;flex-direction:column;gap:12px;margin-bottom:8px;">
+        
+        <div class="library-controls" style="height: 100%; display:flex;flex-direction:column;gap:12px;margin-bottom:8px;">
           <div style="display:flex;gap:12px;align-items:center;">
-            <label for="layerFilter" style="font-size:14px;opacity:.8">Filtrar por capa:</label>
-            <select id="layerFilter" class="btn-small" style="min-width:110px;"></select>
+            <select id="layerFilter" class="btn-small" style="min-width:110px;"><option value="0">Todas</option><option value="1">Capa 1</option><option value="2">Capa 2</option><option value="3">Capa 3</option><option value="4">Capa 4</option><option value="5">Capa 5</option><option value="6">Capa 6</option><option value="7">Capa 7</option><option value="8">Capa 8</option><option value="9">Capa 9</option><option value="10">Capa 10</option><option value="11">Capa 11</option><option value="12">Capa 12</option><option value="13">Capa 13</option><option value="14">Capa 14</option><option value="15">Capa 15</option><option value="16">Capa 16</option><option value="17">Capa 17</option><option value="18">Capa 18</option><option value="19">Capa 19</option><option value="20">Capa 20</option><option value="21">Capa 21</option><option value="22">Capa 22</option><option value="23">Capa 23</option><option value="24">Capa 24</option><option value="25">Capa 25</option><option value="26">Capa 26</option><option value="27">Capa 27</option><option value="28">Capa 28</option><option value="29">Capa 29</option><option value="30">Capa 30</option><option value="31">Capa 31</option><option value="32">Capa 32</option></select>
             <button id="refreshLibraryBtn" class="btn-small">Actualizar</button>
-          </div>
-          <div style="display:flex;gap: 12px;align-items:center;">
-            <div id="layerCountInfo" style="font-size:12px;opacity:.7;margin-left:auto;"></div>
-          </div>
           <div style="display:flex;gap:12px;align-items:center;">
             <button id="deleteLayerBtn" class="btn-small warn">Borrar capa</button>
             <label style="display:flex;align-items:center;gap:6px;font-size:12px;opacity:.8">
               <input type="checkbox" id="deleteFilesChk">borrar archivos
             </label>
           </div>
-        </div>
-        <div id="thumbs" class="thumb-grid" style="display:grid;gap:60px;grid-template-columns:repeat(auto-fill, minmax(120px, 1fr));">
+        <div id="layerCountInfo" style="font-size:12px;opacity:.7;margin-left:auto;">Mostrando 18 imágenes de capa 3.</div></div>
+          <div id="thumbs" class="thumb-container">
           <!-- Thumbnails cargados dinámicamente aquí -->
         </div>
-      </div>
-    </div>
+          
+        </div>
+     
+      </section>
 
-    <div class="bottom-status">
-      <div style="font-size:12px;opacity:.8">Estado UI: solo-grid</div>
-      <div class="system-performance">GPU: — | CPU: — | RAM: — | Modelo: —</div>
+      <!-- Acciones de Capa -->
+      <section class="bottom-panel">
+        <div class="panel-header">
+          <h3 class="panel-subtitle">Acciones de Capa</h3>
+        </div>
+         
+        
+      </section>
     </div>
-  </div>
+  </main>
+
+  <footer class="p-2 border-t border-gray-200 flex items-center justify-center flex-shrink-0 bg-white">
+    <div class="text-xs text-gray-500 font-medium">© 2024 ATL RDT Control Interface. Todos los derechos reservados.</div>
+  </footer>
 
   <!-- Lightbox -->
   <div id="lightbox" class="modal hidden" onclick="closeLightbox(event)">
