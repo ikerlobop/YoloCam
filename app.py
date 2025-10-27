@@ -485,6 +485,17 @@ def bundle_layer_assets(layer: int, grid_cols: int = 5, grid_rows: int = 2, gutt
         print(f"[WARN] No se pudo guardar lámina layer {layer}: {e}")
 
 
+    # 8) Crear marker .done para indicar que la capa está completa (aunque no haya lámina)    
+
+    try:
+        marker = os.path.join(layer_dir_abs, ".done")
+        with open(marker, "w", encoding="utf-8") as f:
+            f.write("ok")
+        print(f"[OK] Marker creado: {marker}")
+    except Exception as e:
+        print(f"[WARN] No se pudo crear marker .done: {e}")
+
+
 # ----------------- CAPTURA (SELECCIÓN ALEATORIA) -----------------
 
 def capture_loop():
@@ -621,11 +632,17 @@ def get_state():
 @app.route("/layers")
 @login_required
 def get_layers():
-    with lock:
-        return jsonify({
-            "current": state["layer_current"],
-            "total": state["layer_total"]
-        })
+    current = state["layer_current"]
+    total = state["layer_total"]
+    # existe marker?
+    layer_dir_abs = os.path.join(app.static_folder, IMAGEN_CAPA_ROOT_REL, f"layer_{current}")
+    final_ready = os.path.isfile(os.path.join(layer_dir_abs, f"layer_{current}.jpg")) or \
+                  os.path.isfile(os.path.join(layer_dir_abs, ".done"))
+    return jsonify({
+        "current": current,
+        "total": total,
+        "final_ready": final_ready
+    })
 
 
 @app.route("/start_capture", methods=["POST"])

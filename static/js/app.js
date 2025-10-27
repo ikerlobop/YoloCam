@@ -972,12 +972,14 @@ async function drawLiveSheet(imagesAbs) {
 async function checkFinalSheet(layerId) {
   const url = `/static/imagen_capa/layer_${layerId}/layer_${layerId}.jpg?cb=${Date.now()}`;
   try {
-    const r = await fetch(url, { method: 'HEAD', cache: 'no-store' });
-    return r.ok ? url : null;
+    const r = await fetch(url, { method: 'GET', cache: 'no-store' });
+    if (r.ok) return url;
+    return null;
   } catch {
     return null;
   }
 }
+
 
 // Bucle de actualización: lee /layers, /state y decide qué mostrar
 async function tickLayerSheet() {
@@ -1185,7 +1187,7 @@ function drawBoxesOnSheet(ctx, boxes, dx, dy, tw, th, iw, ih) {
 
 // Sobrescribimos tickLayerSheet para usar las cajas si existen
 const _tickLayerSheetOrig = tickLayerSheet;
-tickLayerSheet = async function() {
+tickLayerSheet = async function () {
   if (!sheetWatching) return;
   try {
     const lr = await fetch('/layers', { cache: 'no-store' });
@@ -1195,29 +1197,33 @@ tickLayerSheet = async function() {
     const finalUrl = await checkFinalSheet(sheetLayerId);
     if (finalUrl) {
       if (sheetFinal) {
-        const cleanSrc = sheetFinal.src.split('?')[0];
-        if (!cleanSrc.endsWith(`/layer_${sheetLayerId}.jpg`)) sheetFinal.src = finalUrl;
+        sheetFinal.src = finalUrl;
         sheetFinal.classList.remove('hidden');
       }
-      if (sheetCanvas) sheetCanvas.classList.add('hidden');
-      if (sheetStatus) sheetStatus.textContent = `Lámina final generada — capa ${sheetLayerId}`;
-      stopSheetWatcher();
+      sheetCanvas?.classList.add('hidden');
+      sheetStatus && (sheetStatus.textContent = `Lámina final generada — capa ${sheetLayerId}`);
+      stopSheetWatcher();                       // <- importante
+      await drawFinalBoxes(sheetLayerId);       // opcional
       return;
     }
 
-    // Live desde /state, con boxes
+    // Si no hay final, seguimos en modo "live"
     const sr = await fetch('/state', { cache: 'no-store' });
     const sdata = await sr.json();
     const items = sdata.items || [];
-    if (sheetFinal) sheetFinal.classList.add('hidden');
-    if (sheetCanvas) sheetCanvas.classList.remove('hidden');
+    sheetFinal?.classList.add('hidden');
+    sheetCanvas?.classList.remove('hidden');
     await drawLiveSheetWithBoxes(items);
 
+    // Si el backend ya marcó 'stopped', también podemos parar aquí para evitar bucles:
+    if (sdata.stopped) stopSheetWatcher();
+
   } catch (e) {
-    console.warn('tickLayerSheet (bbox) error:', e);
-    if (sheetStatus) sheetStatus.textContent = 'Lámina: error al actualizar';
+    console.warn('tickLayerSheet error:', e);
+    sheetStatus && (sheetStatus.textContent = 'Lámina: error al actualizar');
   }
 };
+
 
 // ---------- BIBLIOTECA DE CAPTURAS ----------
 const _renderLibraryOrig = renderLibrary;
