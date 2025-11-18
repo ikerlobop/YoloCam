@@ -1,0 +1,11 @@
+{
+  "Version": 1,
+  "Hash": "QROobxllymARRrk+TyNipR1yf8zLO1LSJGbBVeuAmTg=",
+  "Source": "Yolocam.Api",
+  "BasePath": "_content/Yolocam.Api",
+  "Mode": "Default",
+  "ManifestType": "Build",
+  "ReferencedProjectsConfiguration": [],
+  "DiscoveryPatterns": [],
+  "Assets": []
+}
