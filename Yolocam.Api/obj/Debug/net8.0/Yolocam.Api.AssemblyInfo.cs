@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("Yolocam.Api")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+625f90832ed7e4f0869d898c12830e39ce431b1a")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+81b1ec9b7e4a40a15343d794cbd8757563d0b7b5")]
 [assembly: System.Reflection.AssemblyProductAttribute("Yolocam.Api")]
 [assembly: System.Reflection.AssemblyTitleAttribute("Yolocam.Api")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

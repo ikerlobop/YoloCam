@@ -1,8 +1,8 @@
 {
   "version": 2,
-  "dgSpecHash": "eFdOZ1NJugk=",
+  "dgSpecHash": "FTp+Sb/tvZU=",
   "success": true,
-  "projectFilePath": "C:\\Users\\iker.lobo\\Yolo\\YoloCam\\Yolocam.Api\\Yolocam.Api.csproj",
+  "projectFilePath": "C:\\Users\\iker.lobo\\Yolo\\prueba\\YoloCam\\Yolocam.Api\\Yolocam.Api.csproj",
   "expectedPackageFiles": [
     "C:\\Users\\iker.lobo\\.nuget\\packages\\microsoft.aspnetcore.openapi\\8.0.21\\microsoft.aspnetcore.openapi.8.0.21.nupkg.sha512",
     "C:\\Users\\iker.lobo\\.nuget\\packages\\microsoft.extensions.apidescription.server\\6.0.5\\microsoft.extensions.apidescription.server.6.0.5.nupkg.sha512",

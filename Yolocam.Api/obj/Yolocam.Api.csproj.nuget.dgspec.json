@@ -1,17 +1,17 @@
 {
   "format": 1,
   "restore": {
-    "C:\\Users\\iker.lobo\\Yolo\\YoloCam\\Yolocam.Api\\Yolocam.Api.csproj": {}
+    "C:\\Users\\iker.lobo\\Yolo\\prueba\\YoloCam\\Yolocam.Api\\Yolocam.Api.csproj": {}
   },
   "projects": {
-    "C:\\Users\\iker.lobo\\Yolo\\YoloCam\\Yolocam.Api\\Yolocam.Api.csproj": {
+    "C:\\Users\\iker.lobo\\Yolo\\prueba\\YoloCam\\Yolocam.Api\\Yolocam.Api.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "C:\\Users\\iker.lobo\\Yolo\\YoloCam\\Yolocam.Api\\Yolocam.Api.csproj",
+        "projectUniqueName": "C:\\Users\\iker.lobo\\Yolo\\prueba\\YoloCam\\Yolocam.Api\\Yolocam.Api.csproj",
         "projectName": "Yolocam.Api",
-        "projectPath": "C:\\Users\\iker.lobo\\Yolo\\YoloCam\\Yolocam.Api\\Yolocam.Api.csproj",
+        "projectPath": "C:\\Users\\iker.lobo\\Yolo\\prueba\\YoloCam\\Yolocam.Api\\Yolocam.Api.csproj",
         "packagesPath": "C:\\Users\\iker.lobo\\.nuget\\packages\\",
-        "outputPath": "C:\\Users\\iker.lobo\\Yolo\\YoloCam\\Yolocam.Api\\obj\\",
+        "outputPath": "C:\\Users\\iker.lobo\\Yolo\\prueba\\YoloCam\\Yolocam.Api\\obj\\",
         "projectStyle": "PackageReference",
         "configFilePaths": [
           "C:\\Users\\iker.lobo\\AppData\\Roaming\\NuGet\\NuGet.Config"
